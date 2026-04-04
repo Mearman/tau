@@ -169,7 +169,7 @@ export default function (pi: ExtensionAPI) {
                     display: true,
                   }, {
                     deliverAs: "followUp",
-                    triggerTurn: false,
+                    triggerTurn: true,
                   });
                 }, 0);
               }
@@ -207,7 +207,7 @@ export default function (pi: ExtensionAPI) {
                   display: true,
                 }, {
                   deliverAs: "followUp",
-                  triggerTurn: false,
+                  triggerTurn: true,
                 });
               }, 0);
 
@@ -537,7 +537,15 @@ export default function (pi: ExtensionAPI) {
           });
           ctx.ui.setStatus("bg-fg", undefined);
           const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
-          await ctx.ui.editor(`Foreground view: ${job.id}`, fullText);
+          pi.sendMessage({
+            customType: "bg-attach",
+            content: fullText,
+            display: true,
+          }, {
+            deliverAs: "steer",
+            triggerTurn: false,
+          });
+          ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
         } else if (action === 1) { // Show Output
           const text = getJobOutputSnapshot(job);
           const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
@@ -601,7 +609,15 @@ export default function (pi: ExtensionAPI) {
           onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
         });
         const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
-        await ctx.ui.editor(`Foreground view: ${job.id}`, fullText);
+        pi.sendMessage({
+          customType: "bg-attach",
+          content: fullText,
+          display: true,
+        }, {
+          deliverAs: "steer",
+          triggerTurn: false,
+        });
+        ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
       } finally {
         ctx.ui.setStatus("bg-fg", undefined);
       }
@@ -683,7 +699,7 @@ export default function (pi: ExtensionAPI) {
                 display: true,
               }, {
                 deliverAs: "followUp",
-                triggerTurn: false,
+                triggerTurn: true,
               });
             }, 0);
           }
@@ -708,7 +724,7 @@ export default function (pi: ExtensionAPI) {
               display: true,
             }, {
               deliverAs: "followUp",
-              triggerTurn: false,
+              triggerTurn: true,
             });
           }, 0);
         }
