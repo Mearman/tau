@@ -59,6 +59,8 @@ export default function (pi: ExtensionAPI) {
         const proc = spawn('bash', ['-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
           cwd: ctx.cwd,
+          detached: true, // Allow process to continue independently
+          env: { ...process.env }, // Inherit environment
         });
 
         if (!proc.pid) {
@@ -454,7 +456,8 @@ export default function (pi: ExtensionAPI) {
       const proc = spawn('bash', ['-c', params.command], {
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: ctx.cwd,
-        detached: false,
+        detached: true, // Allow process to continue independently
+        env: { ...process.env }, // Inherit environment
       });
 
       if (!proc.pid) {
