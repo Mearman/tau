@@ -570,13 +570,13 @@ export default function (pi: ExtensionAPI) {
 
   // Manual foreground attach command
   pi.registerCommand("fg", {
-    description: "Attach to a background job (/fg <job-id> [--no-wait])",
+    description: "Attach to a background job (/fg <job-id> [--snapshot])",
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const jobId = parts[0];
-      const noWait = parts.includes("--no-wait") || parts.includes("-n");
+      const snapshot = parts.includes("--snapshot") || parts.includes("-s");
       if (!jobId) {
-        ctx.ui.notify("Usage: /fg <job-id> [--no-wait]", "warning");
+        ctx.ui.notify("Usage: /fg <job-id> [--snapshot]", "warning");
         return;
       }
 
@@ -586,10 +586,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${noWait ? " (snapshot mode)" : ""}...`);
+      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${snapshot ? " (snapshot mode)" : ""}...`);
       try {
         const attached = await attachJob(job, {
-          waitForCompletion: !noWait,
+          waitForCompletion: !snapshot,
           onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
         });
         const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
