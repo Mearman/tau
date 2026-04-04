@@ -93,6 +93,12 @@ export default function (pi: ExtensionAPI) {
           output += chunk;
           hasOutput = true;
 
+          // Keep live output buffer for attached/backgrounded jobs
+          if (runningProcess.backgrounded) {
+            const bgJob = Array.from(backgroundJobs.values()).find((j) => j.toolCallId === toolCallId);
+            if (bgJob) bgJob.output = output;
+          }
+
           // Stream updates if not backgrounded
           if (!runningProcess.backgrounded && onUpdate) {
             onUpdate({
@@ -106,6 +112,12 @@ export default function (pi: ExtensionAPI) {
           const chunk = data.toString();
           output += chunk;
           hasOutput = true;
+
+          // Keep live output buffer for attached/backgrounded jobs
+          if (runningProcess.backgrounded) {
+            const bgJob = Array.from(backgroundJobs.values()).find((j) => j.toolCallId === toolCallId);
+            if (bgJob) bgJob.output = output;
+          }
 
           // Stream updates if not backgrounded
           if (!runningProcess.backgrounded && onUpdate) {
@@ -260,6 +272,26 @@ export default function (pi: ExtensionAPI) {
 
       // Background the process
       backgroundProcess(runningProcess, ctx);
+    },
+  });
+
+  // Manual command alias: /bg
+  pi.registerCommand("bg", {
+    description: "Background the currently running bash process",
+    handler: async (_args, ctx) => {
+      if (!currentlyRunningToolCallId) {
+        ctx.ui.notify("No running bash process to background", "warning");
+        return;
+      }
+
+      const runningProcess = runningProcesses.get(currentlyRunningToolCallId);
+      if (!runningProcess || runningProcess.backgrounded) {
+        ctx.ui.notify("No active process to background", "warning");
+        return;
+      }
+
+      backgroundProcess(runningProcess, ctx);
+      ctx.ui.notify("Backgrounded current process via /bg", "info");
     },
   });
 
@@ -538,11 +570,13 @@ export default function (pi: ExtensionAPI) {
 
   // Manual foreground attach command
   pi.registerCommand("fg", {
-    description: "Attach to a background job and wait for completion (/fg <job-id>)",
+    description: "Attach to a background job (/fg <job-id> [--no-wait])",
     handler: async (args, ctx) => {
-      const jobId = args.trim();
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const jobId = parts[0];
+      const noWait = parts.includes("--no-wait") || parts.includes("-n");
       if (!jobId) {
-        ctx.ui.notify("Usage: /fg <job-id>", "warning");
+        ctx.ui.notify("Usage: /fg <job-id> [--no-wait]", "warning");
         return;
       }
 
@@ -552,10 +586,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
+      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${noWait ? " (snapshot mode)" : ""}...`);
       try {
         const attached = await attachJob(job, {
-          waitForCompletion: true,
+          waitForCompletion: !noWait,
           onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
         });
         const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
