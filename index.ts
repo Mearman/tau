@@ -640,8 +640,7 @@ export default function (pi: ExtensionAPI) {
     updateJobsWidget(ctx);
   });
 
-  // Persist state periodically and on key events
-  pi.on("agent_end", () => persistState());
+  // Only persist on shutdown to avoid interfering with conversation flow
   pi.on("session_shutdown", async () => {
     // Kill all running background jobs
     for (const job of backgroundJobs.values()) {
@@ -650,17 +649,5 @@ export default function (pi: ExtensionAPI) {
       }
     }
     persistState();
-  });
-
-  // Status update notifications
-  pi.on("session_start", async (_event, ctx) => {
-    const runningCount = Array.from(backgroundJobs.values())
-      .filter(job => job.status === 'running').length;
-    
-    if (runningCount > 0) {
-      ctx.ui.notify(`Restored ${runningCount} background job(s)`, "info");
-    }
-    
-    updateJobsWidget(ctx);
   });
 }
