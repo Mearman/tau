@@ -140,10 +140,21 @@ export default function (pi: ExtensionAPI) {
 
               // Notify completion
               const duration = Math.round((Date.now() - job.startTime) / 1000);
+              const statusText = `Background job ${job.id} ${job.status} (${duration}s)`;
               ctx.ui.notify(
-                `Background job ${job.id} ${job.status} (${duration}s)`,
+                statusText,
                 job.status === 'completed' ? 'success' : 'error'
               );
+
+              // Also notify the agent via message
+              pi.sendMessage({
+                customType: "job-completion",
+                content: `🔄 ${statusText}\nCommand: ${job.command}`,
+                display: true,
+              }, {
+                deliverAs: "steer",
+                triggerTurn: false,
+              });
               
               updateJobsWidget(ctx);
             }
@@ -168,7 +179,19 @@ export default function (pi: ExtensionAPI) {
               job.output += `\nProcess error: ${err.message}`;
               delete job.proc;
               
-              ctx.ui.notify(`Background job ${job.id} failed: ${err.message}`, 'error');
+              const errorText = `Background job ${job.id} failed: ${err.message}`;
+              ctx.ui.notify(errorText, 'error');
+
+              // Also notify the agent via message
+              pi.sendMessage({
+                customType: "job-completion",
+                content: `❌ ${errorText}\nCommand: ${job.command}`,
+                display: true,
+              }, {
+                deliverAs: "steer",
+                triggerTurn: false,
+              });
+
               updateJobsWidget(ctx);
             }
           } else {
@@ -462,10 +485,21 @@ export default function (pi: ExtensionAPI) {
 
         if (shouldNotify) {
           const duration = Math.round((Date.now() - job.startTime) / 1000);
+          const statusText = `Background job ${jobId} ${job.status} (${duration}s)`;
           ctx.ui.notify(
-            `Background job ${jobId} ${job.status} (${duration}s)`,
+            statusText,
             job.status === 'completed' ? 'success' : 'error'
           );
+
+          // Also notify the agent via message
+          pi.sendMessage({
+            customType: "job-completion",
+            content: `🔄 ${statusText}\nCommand: ${job.command}`,
+            display: true,
+          }, {
+            deliverAs: "steer",
+            triggerTurn: false,
+          });
         }
         
         updateJobsWidget(ctx);
@@ -477,7 +511,18 @@ export default function (pi: ExtensionAPI) {
         delete job.proc;
         
         if (shouldNotify) {
-          ctx.ui.notify(`Background job ${jobId} failed: ${err.message}`, 'error');
+          const errorText = `Background job ${jobId} failed: ${err.message}`;
+          ctx.ui.notify(errorText, 'error');
+
+          // Also notify the agent via message
+          pi.sendMessage({
+            customType: "job-completion",
+            content: `❌ ${errorText}\nCommand: ${job.command}`,
+            display: true,
+          }, {
+            deliverAs: "steer",
+            triggerTurn: false,
+          });
         }
         
         updateJobsWidget(ctx);
