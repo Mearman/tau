@@ -385,51 +385,56 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Shared function for job management interface
+  async function showJobsInterface(ctx: ExtensionContext) {
+    const jobs = Array.from(backgroundJobs.values());
+    
+    if (jobs.length === 0) {
+      ctx.ui.notify("No background jobs", "info");
+      return;
+    }
+
+    const choice = await ctx.ui.select(
+      "Background Jobs",
+      jobs.map(job => {
+        const duration = Math.round((Date.now() - job.startTime) / 1000);
+        const status = job.status === 'running' ? `⏳ (${duration}s)` 
+                     : job.status === 'completed' ? '✅'
+                     : '❌';
+        return `${status} ${job.id}: ${job.command.slice(0, 40)}`;
+      })
+    );
+    
+    if (choice !== undefined) {
+      const job = jobs[choice];
+      const actions = job.status === 'running' 
+        ? ["Show Output", "Kill Job"]
+        : ["Show Output", "Remove from List"];
+        
+      const action = await ctx.ui.select(`Job: ${job.id}`, actions);
+      
+      if (action === 0) { // Show Output
+        const text = job.output || "(no output yet)";
+        const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
+        await ctx.ui.editor(`Output for ${job.id}`, fullText);
+      } else if (action === 1) {
+        if (job.status === 'running' && job.proc) { // Kill
+          job.proc.kill('SIGTERM');
+          ctx.ui.notify(`Killed job ${job.id}`, "info");
+        } else { // Remove
+          backgroundJobs.delete(job.id);
+          ctx.ui.notify(`Removed job ${job.id}`, "info");
+        }
+        updateJobsWidget(ctx);
+      }
+    }
+  }
+
   // Interactive command for job management
   pi.registerCommand("jobs", {
     description: "Show and manage background jobs interactively",
     handler: async (args, ctx) => {
-      const jobs = Array.from(backgroundJobs.values());
-      
-      if (jobs.length === 0) {
-        ctx.ui.notify("No background jobs", "info");
-        return;
-      }
-
-      const choice = await ctx.ui.select(
-        "Background Jobs",
-        jobs.map(job => {
-          const duration = Math.round((Date.now() - job.startTime) / 1000);
-          const status = job.status === 'running' ? `⏳ (${duration}s)` 
-                       : job.status === 'completed' ? '✅'
-                       : '❌';
-          return `${status} ${job.id}: ${job.command.slice(0, 40)}`;
-        })
-      );
-      
-      if (choice !== undefined) {
-        const job = jobs[choice];
-        const actions = job.status === 'running' 
-          ? ["Show Output", "Kill Job"]
-          : ["Show Output", "Remove from List"];
-          
-        const action = await ctx.ui.select(`Job: ${job.id}`, actions);
-        
-        if (action === 0) { // Show Output
-          const text = job.output || "(no output yet)";
-          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
-          await ctx.ui.editor(`Output for ${job.id}`, fullText);
-        } else if (action === 1) {
-          if (job.status === 'running' && job.proc) { // Kill
-            job.proc.kill('SIGTERM');
-            ctx.ui.notify(`Killed job ${job.id}`, "info");
-          } else { // Remove
-            backgroundJobs.delete(job.id);
-            ctx.ui.notify(`Removed job ${job.id}`, "info");
-          }
-          updateJobsWidget(ctx);
-        }
-      }
+      await showJobsInterface(ctx);
     },
   });
 
