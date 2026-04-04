@@ -160,19 +160,18 @@ export default function (pi: ExtensionAPI) {
                 job.status === 'completed' ? 'success' : 'error'
               );
 
-              // Also notify the agent via message (only for failures)
-              if (job.status === 'failed') {
-                setTimeout(() => {
-                  pi.sendMessage({
-                    customType: "job-completion",
-                    content: `🔄 ${statusText}\nCommand: ${job.command}`,
-                    display: true,
-                  }, {
-                    deliverAs: "followUp",
-                    triggerTurn: true,
-                  });
-                }, 0);
-              }
+              // Also notify the agent via message (all terminal states)
+              setTimeout(() => {
+                const emoji = job.status === 'completed' ? '✅' : '❌';
+                pi.sendMessage({
+                  customType: "job-completion",
+                  content: `${emoji} ${statusText}\nCommand: ${job.command}`,
+                  display: true,
+                }, {
+                  deliverAs: "followUp",
+                  triggerTurn: true,
+                });
+              }, 0);
               
               updateJobsWidget(ctx);
             }
@@ -690,19 +689,18 @@ export default function (pi: ExtensionAPI) {
             job.status === 'completed' ? 'success' : 'error'
           );
 
-          // Also notify the agent via message (only for failures)
-          if (job.status === 'failed') {
-            setTimeout(() => {
-              pi.sendMessage({
-                customType: "job-completion",
-                content: `🔄 ${statusText}\nCommand: ${job.command}`,
-                display: true,
-              }, {
-                deliverAs: "followUp",
-                triggerTurn: true,
-              });
-            }, 0);
-          }
+          // Also notify the agent via message (all terminal states)
+          setTimeout(() => {
+            const emoji = job.status === 'completed' ? '✅' : '❌';
+            pi.sendMessage({
+              customType: "job-completion",
+              content: `${emoji} ${statusText}\nCommand: ${job.command}`,
+              display: true,
+            }, {
+              deliverAs: "followUp",
+              triggerTurn: true,
+            });
+          }, 0);
         }
         
         // Remove updateJobsWidget call - UI operations in async handlers interfere with conversation flow
