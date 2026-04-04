@@ -236,6 +236,14 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Register Ctrl+J shortcut for quick jobs access
+  pi.registerShortcut("ctrl+j", {
+    description: "Open background jobs interface",
+    handler: async (ctx) => {
+      await showJobsInterface(ctx);
+    },
+  });
+
   // Register Ctrl+Shift+B shortcut to background current process
   pi.registerShortcut("ctrl+shift+b", {
     description: "Background current bash process",
