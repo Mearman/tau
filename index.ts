@@ -570,20 +570,28 @@ export default function (pi: ExtensionAPI) {
 
   // Manual foreground attach command
   pi.registerCommand("fg", {
-    description: "Attach to a background job (/fg <job-id> [--snapshot])",
+    description: "Attach to a background job (/fg [job-id] [--snapshot]); defaults to most recent running job",
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
-      const jobId = parts[0];
       const snapshot = parts.includes("--snapshot") || parts.includes("-s");
-      if (!jobId) {
-        ctx.ui.notify("Usage: /fg <job-id> [--snapshot]", "warning");
-        return;
-      }
+      const explicitJobId = parts.find((p) => !p.startsWith("-"));
 
-      const job = backgroundJobs.get(jobId);
-      if (!job) {
-        ctx.ui.notify(`Job not found: ${jobId}`, "error");
-        return;
+      let job: BackgroundJob | undefined;
+      if (explicitJobId) {
+        job = backgroundJobs.get(explicitJobId);
+        if (!job) {
+          ctx.ui.notify(`Job not found: ${explicitJobId}`, "error");
+          return;
+        }
+      } else {
+        job = Array.from(backgroundJobs.values())
+          .filter((j) => j.status === "running")
+          .sort((a, b) => b.startTime - a.startTime)[0];
+
+        if (!job) {
+          ctx.ui.notify("No running background jobs to attach. Usage: /fg [job-id] [--snapshot]", "warning");
+          return;
+        }
       }
 
       ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${snapshot ? " (snapshot mode)" : ""}...`);
