@@ -137,10 +137,8 @@ export default function (pi: ExtensionAPI) {
             const job = Array.from(backgroundJobs.values())
               .find(j => j.toolCallId === toolCallId);
             if (job) {
-              job.status = (code === 0) ? 'completed' : 'failed';
-              job.exitCode = code || 0;
               job.output = output;
-              delete job.proc;
+              markJobTerminal(job, (code === 0) ? 'completed' : 'failed', code || 0);
 
               // Notify completion
               const duration = Math.round((Date.now() - job.startTime) / 1000);
@@ -183,9 +181,8 @@ export default function (pi: ExtensionAPI) {
             const job = Array.from(backgroundJobs.values())
               .find(j => j.toolCallId === toolCallId);
             if (job) {
-              job.status = 'failed';
               job.output += `\nProcess error: ${err.message}`;
-              delete job.proc;
+              markJobTerminal(job, 'failed');
               
               const errorText = `Background job ${job.id} failed: ${err.message}`;
               ctx.ui.notify(errorText, 'error');
@@ -296,6 +293,7 @@ export default function (pi: ExtensionAPI) {
       proc: runningProcess.proc,
       toolCallId: runningProcess.toolCallId,
     };
+    createJobDonePromise(job);
 
     // Mark as backgrounded
     runningProcess.backgrounded = true;
@@ -324,26 +322,149 @@ export default function (pi: ExtensionAPI) {
     // Remove updateJobsWidget call - UI operations during critical operations interfere with conversation flow
   }
 
-  // Minimal jobs tool to isolate conversation flow issue
+  function getJobOutputSnapshot(job: BackgroundJob, maxChars: number = 12000): string {
+    const output = job.output || "(no output yet)";
+    if (output.length <= maxChars) return output;
+    return `...[truncated, showing last ${maxChars} chars]\n${output.slice(-maxChars)}`;
+  }
+
+  function formatJobLine(job: BackgroundJob): string {
+    const duration = Math.round((Date.now() - job.startTime) / 1000);
+    const status = job.status === 'running' ? `⏳ running (${duration}s)`
+      : job.status === 'completed' ? '✅ completed'
+      : '❌ failed';
+    return `${job.id}: ${job.command.slice(0, 80)} - ${status}`;
+  }
+
+  async function attachJob(
+    job: BackgroundJob,
+    options?: {
+      waitForCompletion?: boolean;
+      signal?: AbortSignal;
+      onProgress?: (text: string) => void;
+    },
+  ): Promise<{ status: BackgroundJob['status']; output: string }> {
+    const waitForCompletion = options?.waitForCompletion ?? true;
+
+    if (job.status === 'running' && waitForCompletion) {
+      if (!job.donePromise || !job.resolveDone) {
+        createJobDonePromise(job);
+      }
+
+      let lastLen = -1;
+      const tick = setInterval(() => {
+        if (job.output.length !== lastLen) {
+          lastLen = job.output.length;
+          options?.onProgress?.(`Attaching to ${job.id}: captured ${lastLen} chars...`);
+        }
+      }, 1000);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => reject(new Error("Attach cancelled"));
+          options?.signal?.addEventListener("abort", onAbort, { once: true });
+          job.donePromise!.then(() => {
+            options?.signal?.removeEventListener("abort", onAbort);
+            resolve();
+          }).catch(reject);
+        });
+      } finally {
+        clearInterval(tick);
+      }
+    }
+
+    return {
+      status: job.status,
+      output: getJobOutputSnapshot(job),
+    };
+  }
+
+  // Jobs tool: agent-manageable lifecycle (list/output/kill/attach)
   pi.registerTool({
     name: "jobs",
     label: "Background Jobs",
-    description: "List background jobs (minimal version for debugging)",
+    description: "List, inspect, kill, or attach to background jobs",
     parameters: Type.Object({
-      action: Type.Literal("list"),
+      action: Type.Union([
+        Type.Literal("list"),
+        Type.Literal("output"),
+        Type.Literal("kill"),
+        Type.Literal("attach"),
+      ]),
+      jobId: Type.Optional(Type.String({ description: "Job ID for output/kill/attach" })),
+      wait: Type.Optional(Type.Boolean({ description: "For attach: wait for completion (default true)" })),
     }),
 
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      // Absolute minimal logic - just count jobs
-      const count = backgroundJobs.size;
-      
-      return {
-        content: [{ 
-          type: "text", 
-          text: `Found ${count} background jobs` 
-        }],
-        details: { count },
-      };
+    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+      switch (params.action) {
+        case "list": {
+          const jobs = Array.from(backgroundJobs.values());
+          const lines = jobs.map(formatJobLine);
+          return {
+            content: [{
+              type: "text",
+              text: lines.length > 0 ? `Background Jobs:\n${lines.join("\n")}` : "No background jobs",
+            }],
+            details: { count: jobs.length },
+          };
+        }
+
+        case "output": {
+          if (!params.jobId) throw new Error("jobId is required for action=output");
+          const job = backgroundJobs.get(params.jobId);
+          if (!job) throw new Error(`Job not found: ${params.jobId}`);
+          return {
+            content: [{
+              type: "text",
+              text: `Output for ${job.id} (${job.status})\n\n${getJobOutputSnapshot(job)}`,
+            }],
+            details: { jobId: job.id, status: job.status },
+          };
+        }
+
+        case "kill": {
+          if (!params.jobId) throw new Error("jobId is required for action=kill");
+          const job = backgroundJobs.get(params.jobId);
+          if (!job) throw new Error(`Job not found: ${params.jobId}`);
+          if (job.status !== 'running' || !job.proc) {
+            throw new Error(`Job is not running: ${job.id}`);
+          }
+          job.proc.kill('SIGTERM');
+          markJobTerminal(job, 'failed');
+          return {
+            content: [{ type: "text", text: `Sent SIGTERM to ${job.id}` }],
+            details: { jobId: job.id },
+          };
+        }
+
+        case "attach": {
+          if (!params.jobId) throw new Error("jobId is required for action=attach");
+          const job = backgroundJobs.get(params.jobId);
+          if (!job) throw new Error(`Job not found: ${params.jobId}`);
+
+          const wait = params.wait ?? true;
+          onUpdate?.({
+            content: [{ type: "text", text: `Attaching to ${job.id} (${job.status})...` }],
+            details: { partial: true },
+          });
+
+          const attached = await attachJob(job, {
+            waitForCompletion: wait,
+            signal,
+            onProgress: (text) => {
+              onUpdate?.({ content: [{ type: "text", text }], details: { partial: true } });
+            },
+          });
+
+          return {
+            content: [{
+              type: "text",
+              text: `Attach finished for ${job.id}. Status: ${attached.status}\n\n${attached.output}`,
+            }],
+            details: { jobId: job.id, status: attached.status },
+          };
+        }
+      }
     },
   });
 
@@ -369,25 +490,40 @@ export default function (pi: ExtensionAPI) {
     
     if (choice !== undefined) {
       const job = jobs[choice];
-      const actions = job.status === 'running' 
-        ? ["Show Output", "Kill Job"]
+      const actions = job.status === 'running'
+        ? ["Attach Foreground", "Show Output", "Kill Job"]
         : ["Show Output", "Remove from List"];
-        
+
       const action = await ctx.ui.select(`Job: ${job.id}`, actions);
-      
-      if (action === 0) { // Show Output
-        const text = job.output || "(no output yet)";
-        const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
-        await ctx.ui.editor(`Output for ${job.id}`, fullText);
-      } else if (action === 1) {
-        if (job.status === 'running' && job.proc) { // Kill
+
+      if (job.status === 'running') {
+        if (action === 0) { // Attach Foreground
+          ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
+          const attached = await attachJob(job, {
+            waitForCompletion: true,
+            onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
+          });
+          ctx.ui.setStatus("bg-fg", undefined);
+          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
+          await ctx.ui.editor(`Foreground view: ${job.id}`, fullText);
+        } else if (action === 1) { // Show Output
+          const text = getJobOutputSnapshot(job);
+          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
+          await ctx.ui.editor(`Output for ${job.id}`, fullText);
+        } else if (action === 2 && job.proc) { // Kill
           job.proc.kill('SIGTERM');
+          markJobTerminal(job, 'failed');
           ctx.ui.notify(`Killed job ${job.id}`, "info");
-        } else { // Remove
+        }
+      } else {
+        if (action === 0) { // Show Output
+          const text = getJobOutputSnapshot(job);
+          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
+          await ctx.ui.editor(`Output for ${job.id}`, fullText);
+        } else if (action === 1) { // Remove from List
           backgroundJobs.delete(job.id);
           ctx.ui.notify(`Removed job ${job.id}`, "info");
         }
-        // Remove updateJobsWidget call - UI operations during tool execution interfere with conversation flow
       }
     }
   }
@@ -395,8 +531,38 @@ export default function (pi: ExtensionAPI) {
   // Interactive command for job management
   pi.registerCommand("jobs", {
     description: "Show and manage background jobs interactively",
-    handler: async (args, ctx) => {
+    handler: async (_args, ctx) => {
       await showJobsInterface(ctx);
+    },
+  });
+
+  // Manual foreground attach command
+  pi.registerCommand("fg", {
+    description: "Attach to a background job and wait for completion (/fg <job-id>)",
+    handler: async (args, ctx) => {
+      const jobId = args.trim();
+      if (!jobId) {
+        ctx.ui.notify("Usage: /fg <job-id>", "warning");
+        return;
+      }
+
+      const job = backgroundJobs.get(jobId);
+      if (!job) {
+        ctx.ui.notify(`Job not found: ${jobId}`, "error");
+        return;
+      }
+
+      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
+      try {
+        const attached = await attachJob(job, {
+          waitForCompletion: true,
+          onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
+        });
+        const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
+        await ctx.ui.editor(`Foreground view: ${job.id}`, fullText);
+      } finally {
+        ctx.ui.setStatus("bg-fg", undefined);
+      }
     },
   });
 
@@ -441,6 +607,7 @@ export default function (pi: ExtensionAPI) {
         proc,
         toolCallId,
       };
+      createJobDonePromise(job);
 
       backgroundJobs.set(jobId, job);
 
@@ -455,9 +622,7 @@ export default function (pi: ExtensionAPI) {
 
       // Handle completion
       proc.on('close', (code) => {
-        job.status = (code === 0) ? 'completed' : 'failed';
-        job.exitCode = code || 0;
-        delete job.proc;
+        markJobTerminal(job, (code === 0) ? 'completed' : 'failed', code || 0);
 
         if (shouldNotify) {
           const duration = Math.round((Date.now() - job.startTime) / 1000);
@@ -486,9 +651,8 @@ export default function (pi: ExtensionAPI) {
       });
 
       proc.on('error', (err) => {
-        job.status = 'failed';
         job.output += `\nProcess error: ${err.message}`;
-        delete job.proc;
+        markJobTerminal(job, 'failed');
         
         if (shouldNotify) {
           const errorText = `Background job ${jobId} failed: ${err.message}`;
