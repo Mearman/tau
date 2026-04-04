@@ -24,6 +24,8 @@ interface BackgroundJob {
   output: string;
   proc?: ChildProcess;
   toolCallId: string;
+  donePromise?: Promise<void>;
+  resolveDone?: () => void;
 }
 
 interface RunningProcess {
@@ -263,6 +265,24 @@ export default function (pi: ExtensionAPI) {
       backgroundProcess(runningProcess, ctx);
     },
   });
+
+  function createJobDonePromise(job: BackgroundJob): void {
+    let resolveDone: (() => void) | undefined;
+    job.donePromise = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    job.resolveDone = resolveDone;
+  }
+
+  function markJobTerminal(job: BackgroundJob, status: 'completed' | 'failed', exitCode?: number): void {
+    job.status = status;
+    job.exitCode = exitCode;
+    delete job.proc;
+    if (job.resolveDone) {
+      job.resolveDone();
+      delete job.resolveDone;
+    }
+  }
 
   function backgroundProcess(runningProcess: RunningProcess, ctx: ExtensionContext) {
     const jobId = `job-${++jobCounter}`;
