@@ -146,15 +146,19 @@ export default function (pi: ExtensionAPI) {
                 job.status === 'completed' ? 'success' : 'error'
               );
 
-              // Also notify the agent via message
-              pi.sendMessage({
-                customType: "job-completion",
-                content: `🔄 ${statusText}\nCommand: ${job.command}`,
-                display: true,
-              }, {
-                deliverAs: "steer",
-                triggerTurn: false,
-              });
+              // Also notify the agent via message (only for failures)
+              if (job.status === 'failed') {
+                setTimeout(() => {
+                  pi.sendMessage({
+                    customType: "job-completion",
+                    content: `🔄 ${statusText}\nCommand: ${job.command}`,
+                    display: true,
+                  }, {
+                    deliverAs: "followUp",
+                    triggerTurn: false,
+                  });
+                }, 0);
+              }
               
               updateJobsWidget(ctx);
             }
@@ -182,15 +186,17 @@ export default function (pi: ExtensionAPI) {
               const errorText = `Background job ${job.id} failed: ${err.message}`;
               ctx.ui.notify(errorText, 'error');
 
-              // Also notify the agent via message
-              pi.sendMessage({
-                customType: "job-completion",
-                content: `❌ ${errorText}\nCommand: ${job.command}`,
-                display: true,
-              }, {
-                deliverAs: "steer",
-                triggerTurn: false,
-              });
+              // Also notify the agent via message (errors always reported)
+              setTimeout(() => {
+                pi.sendMessage({
+                  customType: "job-completion",
+                  content: `❌ ${errorText}\nCommand: ${job.command}`,
+                  display: true,
+                }, {
+                  deliverAs: "followUp",
+                  triggerTurn: false,
+                });
+              }, 0);
 
               updateJobsWidget(ctx);
             }
@@ -491,15 +497,19 @@ export default function (pi: ExtensionAPI) {
             job.status === 'completed' ? 'success' : 'error'
           );
 
-          // Also notify the agent via message
-          pi.sendMessage({
-            customType: "job-completion",
-            content: `🔄 ${statusText}\nCommand: ${job.command}`,
-            display: true,
-          }, {
-            deliverAs: "steer",
-            triggerTurn: false,
-          });
+          // Also notify the agent via message (only for failures)
+          if (job.status === 'failed') {
+            setTimeout(() => {
+              pi.sendMessage({
+                customType: "job-completion",
+                content: `🔄 ${statusText}\nCommand: ${job.command}`,
+                display: true,
+              }, {
+                deliverAs: "followUp",
+                triggerTurn: false,
+              });
+            }, 0);
+          }
         }
         
         updateJobsWidget(ctx);
@@ -514,15 +524,17 @@ export default function (pi: ExtensionAPI) {
           const errorText = `Background job ${jobId} failed: ${err.message}`;
           ctx.ui.notify(errorText, 'error');
 
-          // Also notify the agent via message
-          pi.sendMessage({
-            customType: "job-completion",
-            content: `❌ ${errorText}\nCommand: ${job.command}`,
-            display: true,
-          }, {
-            deliverAs: "steer",
-            triggerTurn: false,
-          });
+          // Also notify the agent via message (errors always reported)
+          setTimeout(() => {
+            pi.sendMessage({
+              customType: "job-completion",
+              content: `❌ ${errorText}\nCommand: ${job.command}`,
+              display: true,
+            }, {
+              deliverAs: "followUp",
+              triggerTurn: false,
+            });
+          }, 0);
         }
         
         updateJobsWidget(ctx);
