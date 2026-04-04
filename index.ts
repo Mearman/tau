@@ -301,95 +301,29 @@ export default function (pi: ExtensionAPI) {
     }
 
     ctx.ui.notify(`Process backgrounded as ${jobId}`, "info");
-    updateJobsWidget(ctx);
+    // Remove updateJobsWidget call - UI operations during critical operations interfere with conversation flow
   }
 
-  // Register background job management tool
+  // Minimal jobs tool to isolate conversation flow issue
   pi.registerTool({
     name: "jobs",
     label: "Background Jobs",
-    description: "List and manage background jobs",
-    promptSnippet: "List, monitor, kill, or view output of background jobs",
-    promptGuidelines: [
-      "Use this tool to check on background processes started with bash",
-      "View job output with action 'output' and jobId",
-      "Kill running jobs with action 'kill' and jobId"
-    ],
+    description: "List background jobs (minimal version for debugging)",
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("list"),
-        Type.Literal("kill"), 
-        Type.Literal("output"),
-      ]),
-      jobId: Type.Optional(Type.String({ description: "Job ID for kill/output actions" })),
+      action: Type.Literal("list"),
     }),
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      switch (params.action) {
-        case "list":
-          const jobList = Array.from(backgroundJobs.values()).map(job => {
-            const duration = Math.round((Date.now() - job.startTime) / 1000);
-            const status = job.status === 'running' ? `⏳ running (${duration}s)` 
-                         : job.status === 'completed' ? '✅ completed'
-                         : '❌ failed';
-            return `${job.id}: ${job.command.slice(0, 60)} - ${status}`;
-          });
-
-          return {
-            content: [{ 
-              type: "text", 
-              text: jobList.length > 0 ? 
-                `Background Jobs:\n${jobList.join('\n')}` : 
-                'No background jobs' 
-            }],
-            details: { 
-              jobs: Array.from(backgroundJobs.values()),
-              count: backgroundJobs.size,
-            },
-          };
-
-        case "kill":
-          if (!params.jobId) throw new Error("jobId required for kill action");
-          
-          const job = backgroundJobs.get(params.jobId);
-          if (!job) throw new Error(`Job ${params.jobId} not found`);
-          
-          if (job.proc && job.status === 'running') {
-            job.proc.kill('SIGTERM');
-            job.status = 'failed';
-            delete job.proc;
-            updateJobsWidget(ctx);
-            return {
-              content: [{ type: "text", text: `Killed job ${params.jobId}` }],
-              details: { killed: true, jobId: params.jobId },
-            };
-          }
-          
-          throw new Error(`Job ${params.jobId} is not running`);
-
-        case "output":
-          if (!params.jobId) throw new Error("jobId required for output action");
-          
-          const outputJob = backgroundJobs.get(params.jobId);
-          if (!outputJob) throw new Error(`Job ${params.jobId} not found`);
-          
-          const outputText = outputJob.output || '(no output yet)';
-          return {
-            content: [{ 
-              type: "text", 
-              text: `Output for ${params.jobId}:\nCommand: ${outputJob.command}\nStatus: ${outputJob.status}\n\n${outputText}` 
-            }],
-            details: { 
-              jobId: params.jobId,
-              output: outputJob.output,
-              command: outputJob.command,
-              status: outputJob.status,
-            },
-          };
-
-        default:
-          throw new Error(`Unknown action: ${params.action}`);
-      }
+      // Absolute minimal logic - just count jobs
+      const count = backgroundJobs.size;
+      
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Found ${count} background jobs` 
+        }],
+        details: { count },
+      };
     },
   });
 
@@ -433,7 +367,7 @@ export default function (pi: ExtensionAPI) {
           backgroundJobs.delete(job.id);
           ctx.ui.notify(`Removed job ${job.id}`, "info");
         }
-        updateJobsWidget(ctx);
+        // Remove updateJobsWidget call - UI operations during tool execution interfere with conversation flow
       }
     }
   }
@@ -528,7 +462,7 @@ export default function (pi: ExtensionAPI) {
           }
         }
         
-        updateJobsWidget(ctx);
+        // Remove updateJobsWidget call - UI operations in async handlers interfere with conversation flow
       });
 
       proc.on('error', (err) => {
@@ -553,10 +487,10 @@ export default function (pi: ExtensionAPI) {
           }, 0);
         }
         
-        updateJobsWidget(ctx);
+        // Remove updateJobsWidget call - UI operations in async handlers interfere with conversation flow
       });
 
-      updateJobsWidget(ctx);
+      // Remove updateJobsWidget call - UI operations during tool execution interfere with conversation flow
 
       return {
         content: [{ 
