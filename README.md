@@ -109,6 +109,7 @@ pi
 | Shortcut | Action |
 |----------|---------|
 | `Ctrl+Shift+B` | Background current running bash process |
+| `Ctrl+J` | Open background jobs interface |
 
 ## Example Session
 
