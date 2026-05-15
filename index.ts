@@ -1073,17 +1073,29 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Agent backgrounding ─────────────────────────────────────────────
 
-	pi.on("agent_start", async (_event, ctx) => {
-		startTitlebarSpinner(ctx);
-		agentStartTime = Date.now();
-
-		// Update status line every second with elapsed time.
+	function startAgentTimer(ctx: { ui: { setStatus(name: string, content: unknown): void; theme: { fg(colour: string, text: string): string } } }): void {
+		stopAgentTimer(ctx);
 		agentTimer = setInterval(() => {
 			if (agentStartTime === undefined) return;
 			const elapsed = formatDuration(Date.now() - agentStartTime);
 			const spinner = ctx.ui.theme.fg("accent", "\u25cf");
 			ctx.ui.setStatus("tau-turn", spinner + ctx.ui.theme.fg("dim", ` ${elapsed}`));
 		}, 1_000);
+	}
+
+	function stopAgentTimer(ctx: { ui: { setStatus(name: string, content: unknown): void; theme: { fg(colour: string, text: string): string } } }): void {
+		if (agentTimer) { clearInterval(agentTimer); agentTimer = null; }
+		if (agentStartTime !== undefined) {
+			const elapsed = formatDuration(Date.now() - agentStartTime);
+			const check = ctx.ui.theme.fg("success", "\u2713");
+			ctx.ui.setStatus("tau-turn", check + ctx.ui.theme.fg("dim", ` ${elapsed}`));
+		}
+	}
+
+	pi.on("agent_start", async (_event, ctx) => {
+		startTitlebarSpinner(ctx);
+		agentStartTime = Date.now();
+		startAgentTimer(ctx);
 	});
 
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
@@ -1109,6 +1121,10 @@ export default function (pi: ExtensionAPI) {
 	// Background hint: after 2s of agent activity, show the shortcut.
 	pi.on("turn_start", async (_event, ctx) => {
 		turnCount++;
+
+		// Restart the elapsed timer between turns.
+		if (agentStartTime !== undefined && !agentTimer) startAgentTimer(ctx);
+
 		if (backgroundHintTimer) clearTimeout(backgroundHintTimer);
 		backgroundHintTimer = setTimeout(() => {
 			ctx.ui.notify("\u23f1 Ctrl+B to background", "info");
@@ -1118,6 +1134,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
+		// Stop the elapsed timer between turns — restarts on next turn_start.
+		if (agentTimer) { clearInterval(agentTimer); agentTimer = null; }
+
 		// Plan-mode progress tracking
 		if (planExecutionMode && planItems.length > 0) {
 			if (isAssistantMessage(event.message)) {
@@ -1771,13 +1790,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		stopTitlebarSpinner(ctx);
 
 		// Stop the elapsed timer and show final duration.
-		if (agentTimer) { clearInterval(agentTimer); agentTimer = null; }
-		if (agentStartTime !== undefined) {
-			const elapsed = formatDuration(Date.now() - agentStartTime);
-			const check = ctx.ui.theme.fg("success", "\u2713");
-			ctx.ui.setStatus("tau-turn", check + ctx.ui.theme.fg("dim", ` ${elapsed}`));
-			agentStartTime = undefined;
-		}
+		stopAgentTimer(ctx);
+		agentStartTime = undefined;
 
 		// ── Plan-mode: completion detection ──────────────────────────────
 		if (planExecutionMode && planItems.length > 0) {
