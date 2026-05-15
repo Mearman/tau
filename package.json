@@ -13,8 +13,7 @@
     "url": "git+https://github.com/Mearman/tau.git"
   },
   "files": [
-    "index.ts",
-    "plan-utils.ts",
+    "src/",
     "README.md"
   ],
   "pi": {
