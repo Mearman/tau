@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/Mearman/tau/compare/v1.0.2...v1.1.0) (2026-05-15)
+
+### Features
+
+* **ui:** add notification config with DnD toggle and persistence ([82d5983](https://github.com/Mearman/tau/commit/82d59830694bea970947974e51214dab94cdba6a))
+
 ## [1.0.2](https://github.com/Mearman/tau/compare/v1.0.1...v1.0.2) (2026-05-15)
 
 ### Documentation
