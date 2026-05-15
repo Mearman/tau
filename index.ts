@@ -1465,11 +1465,14 @@ export default function (pi: ExtensionAPI) {
             return { block: true, reason: "" };
         }
 
-        // Pending job decision: only allow job_decide and jobs.
+        // Pending job decision: block unrelated tools, but allow bash so the
+        // agent can investigate before deciding. The reason message still tells
+        // the agent to use job_decide or jobs.
         if (
             pendingDecisionJobId !== undefined &&
             _event.toolName !== "job_decide" &&
-            _event.toolName !== "jobs"
+            _event.toolName !== "jobs" &&
+            _event.toolName !== "bash"
         ) {
             const job = backgroundJobs.get(pendingDecisionJobId);
             const status =
