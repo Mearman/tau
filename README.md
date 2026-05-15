@@ -1,5 +1,9 @@
 # Tau (τ) — Quality-of-Life Extension for pi
 
+[![npm version](https://img.shields.io/npm/v/pi-tau.svg)](https://www.npmjs.com/package/pi-tau)
+[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Mearman/tau/ci.yml?branch=main)](https://github.com/Mearman/tau/actions)
+
 Background tasks, notifications, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
 
 ## Features
@@ -161,6 +165,20 @@ These require changes to pi core (see [implementation path note](obsidian://open
 3. **No Ctrl+X inside dialogs** — `select()` doesn't support custom keybindings. Can only navigate with ↑/↓/Enter.
 4. **No live output streaming** — `editor()` shows a static snapshot. No file-tail component available.
 
+## Installation
+
+```bash
+pi install npm:pi-tau
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "packages": ["npm:pi-tau"]
+}
+```
+
 ## Licence
 
-Private — [github.com/Mearman/tau](https://github.com/Mearman/tau)
+MIT — [github.com/Mearman/tau](https://github.com/Mearman/tau)
