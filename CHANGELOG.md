@@ -1,3 +1,9 @@
+## [1.2.1](https://github.com/Mearman/tau/compare/v1.2.0...v1.2.1) (2026-05-15)
+
+### Bug Fixes
+
+* **notify:** decouple persistence and system DnD ([c74d32f](https://github.com/Mearman/tau/commit/c74d32fc34bdd5619790664aed7a19411cd7a55a))
+
 ## [1.2.0](https://github.com/Mearman/tau/compare/v1.1.0...v1.2.0) (2026-05-15)
 
 ### Features
