@@ -355,9 +355,7 @@ export default function (pi: ExtensionAPI) {
 	 *  agent yields control back to the user. Ctrl+B again resumes. */
 	let agentBackgrounded = false;
 
-	/** Timer for the background hint shown after 2s of agent activity. */
-	let backgroundHintTimer: NodeJS.Timeout | undefined;
-
+ 
 	// ── Titlebar spinner ────────────────────────────────────────────────
 
 	const BRAILLE_FRAMES = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
@@ -994,7 +992,6 @@ export default function (pi: ExtensionAPI) {
 		// If the agent is backgrounded, bring it back.
 		if (agentBackgrounded) {
 			agentBackgrounded = false;
-			if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
 			ctx.ui.setStatus("agent-backgrounded", undefined);
 			updateWidget(ctx);
 			ctx.ui.notify("\u25b6 Resumed", "success");
@@ -1021,7 +1018,6 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		agentBackgrounded = true;
-		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
 		ctx.ui.setStatus("agent-backgrounded", ctx.ui.theme.fg("warning", "\u23f8 Backgrounded"));
 		updateWidget(ctx);
 
@@ -1118,19 +1114,10 @@ export default function (pi: ExtensionAPI) {
 		return {};
 	});
 
-	// Background hint: after 2s of agent activity, show the shortcut.
+	// Restart the elapsed timer on each turn and count turns.
 	pi.on("turn_start", async (_event, ctx) => {
 		turnCount++;
-
-		// Restart the elapsed timer between turns.
 		if (agentStartTime !== undefined && !agentTimer) startAgentTimer(ctx);
-
-		if (backgroundHintTimer) clearTimeout(backgroundHintTimer);
-		backgroundHintTimer = setTimeout(() => {
-			ctx.ui.notify("\u23f1 Ctrl+B to background", "info");
-			backgroundHintTimer = undefined;
-		}, 2_000);
-		backgroundHintTimer.unref();
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
