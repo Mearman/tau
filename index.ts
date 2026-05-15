@@ -13,7 +13,7 @@
  *
  * Tools: bash (overridden), bash_bg, jobs
  * Commands: /bg, /fg, /jobs
- * Shortcuts: Ctrl+B (background/resume), Ctrl+J (jobs)
+ * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -854,7 +854,14 @@ export default function (pi: ExtensionAPI) {
 	pi.registerShortcut("ctrl+j", {
 		description: "Open background tasks",
 		handler: async (ctx) => {
-			await showJobsInterface(ctx);
+			await showTasksInterface(ctx);
+		},
+	});
+
+	pi.registerShortcut("shift+down", {
+		description: "Open background tasks",
+		handler: async (ctx) => {
+			await showTasksInterface(ctx);
 		},
 	});
 
@@ -949,46 +956,31 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("jobs", {
 		description: "Show and manage background tasks",
 		handler: async (_args, ctx) => {
-			await showJobsInterface(ctx);
+			await showTasksInterface(ctx);
 		},
 	});
 
-	// ── Interactive jobs interface ──────────────────────────────────────
 
-	async function showJobsInterface(ctx: UiContext): Promise<void> {
-		const jobs = Array.from(backgroundJobs.values());
+	// ── Interactive tasks interface ────────────────────────────────────
 
-		if (jobs.length === 0) {
-			ctx.ui.notify("No background jobs", "info");
-			return;
-		}
-
-		const choice = await ctx.ui.select(
-			"Background Jobs",
-			jobs.map(job => {
-				const duration = formatDuration(Date.now() - job.startTime);
-				const status =
-					job.status === "running" ? `⏳ (${duration})` :
-					job.status === "completed" ? "✅" :
-					job.status === "failed" ? "❌" :
-					"🛑";
-				return `${status} ${job.id}: ${job.command.slice(0, 40)}`;
-			}),
-		);
-
-		if (choice === undefined) return;
-		const job = jobs[choice];
-
-		const actions = job.status === "running"
-			? ["Attach Foreground", "Show Output", "Kill Job"]
-			: ["Show Output", "Remove from List"];
-
-		const action = await ctx.ui.select(`Job: ${job.id}`, actions);
-		if (action === undefined) return;
+	async function showTaskDetail(job: BackgroundJob, ctx: UiContext): Promise<void> {
+		const duration = formatDuration(Date.now() - job.startTime);
+		const statusIcon =
+			job.status === "running" ? "\u25d0" :
+			job.status === "completed" ? "\u2705" :
+			job.status === "failed" ? "\u274c" :
+			"\ud83d\udea1";
 
 		if (job.status === "running") {
+			const actions = ["Attach (wait for completion)", "Show Output", "Kill"];
+			const action = await ctx.ui.select(
+				`${statusIcon} ${job.id} \u00b7 ${job.command.slice(0, 50)} \u00b7 ${duration}`,
+				actions,
+			);
+			if (action === undefined) return;
+
 			if (action === 0) {
-				// Attach Foreground
+				// Attach \u2014 wait for completion then post output
 				ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
 				if (!job.donePromise) createJobDonePromise(job);
 				await job.donePromise;
@@ -996,7 +988,8 @@ export default function (pi: ExtensionAPI) {
 
 				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
 				const fullText =
-					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
+					`${job.id} \u00b7 ${job.command}\n` +
+					`Status: ${job.status} \u00b7 Duration: ${formatDuration(Date.now() - job.startTime)}\n` +
 					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
 
 				pi.sendMessage({
@@ -1008,37 +1001,91 @@ export default function (pi: ExtensionAPI) {
 					deliverAs: "steer",
 					triggerTurn: false,
 				});
-				ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
+				ctx.ui.notify(`Attached ${job.id}`, "info");
 			} else if (action === 1) {
 				// Show Output
 				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
-				const fullText =
-					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
-					`PID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n` +
-					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
-				await ctx.ui.editor(`Output for ${job.id}`, fullText);
-			} else if (action === 2 && job.proc) {
+				await ctx.ui.editor(
+					`${statusIcon} ${job.id}: ${job.command.slice(0, 50)}`,
+					`Command: ${job.command}\n` +
+					`PID: ${job.pid} \u00b7 Started: ${new Date(job.startTime).toLocaleString()}\n` +
+					`Duration: ${duration} \u00b7 Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`,
+				);
+			} else if (action === 2) {
 				// Kill
-				killProcessGroup(job.proc.pid!, "SIGTERM");
+				if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
 				markJobTerminal(job, "killed");
-				ctx.ui.notify(`Killed job ${job.id} (process group)`, "info");
+				ctx.ui.notify(`Killed ${job.id}`, "info");
 				updateWidget(ctx);
 			}
 		} else {
+			// Completed/failed/killed
+			const actions = ["Show Output", "Remove from List"];
+			const action = await ctx.ui.select(
+				`${statusIcon} ${job.id} \u00b7 ${job.command.slice(0, 50)} \u00b7 ${job.status}`,
+				actions,
+			);
+			if (action === undefined) return;
+
 			if (action === 0) {
-				// Show Output
 				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
-				const fullText =
-					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
-					`PID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n` +
-					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
-				await ctx.ui.editor(`Output for ${job.id}`, fullText);
+				await ctx.ui.editor(
+					`${statusIcon} ${job.id}: ${job.command.slice(0, 50)}`,
+					`Command: ${job.command}\n` +
+					`PID: ${job.pid} \u00b7 Started: ${new Date(job.startTime).toLocaleString()}\n` +
+					`Status: ${job.status} \u00b7 Exit code: ${job.exitCode ?? "n/a"}\n` +
+					`Duration: ${duration} \u00b7 Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`,
+				);
 			} else if (action === 1) {
-				// Remove from List
 				backgroundJobs.delete(job.id);
-				ctx.ui.notify(`Removed job ${job.id}`, "info");
+				ctx.ui.notify(`Removed ${job.id}`, "info");
 				updateWidget(ctx);
 			}
+		}
+	}
+
+	async function showTasksInterface(ctx: UiContext): Promise<void> {
+		const allJobs = Array.from(backgroundJobs.values());
+		const runningJobs = allJobs.filter(j => j.status === "running");
+		const finishedJobs = allJobs.filter(j => j.status !== "running");
+
+		// Include the backgrounded agent as a virtual task entry.
+		const items: string[] = [];
+		if (agentBackgrounded) {
+			items.push("\u25d0 agent \u00b7 backgrounded \u00b7 Ctrl+B to resume");
+		}
+		for (const job of runningJobs) {
+			const duration = formatDuration(Date.now() - job.startTime);
+			items.push(`\u25d0 ${job.id}: ${job.command.slice(0, 40)} \u00b7 ${duration}`);
+		}
+		for (const job of finishedJobs) {
+			const statusIcon =
+				job.status === "completed" ? "\u2705" :
+				job.status === "failed" ? "\u274c" :
+				"\ud83d\udea1";
+			items.push(`${statusIcon} ${job.id}: ${job.command.slice(0, 40)}`);
+		}
+
+		if (items.length === 0) {
+			ctx.ui.notify("No background tasks", "info");
+			return;
+		}
+
+		const choice = await ctx.ui.select("Background Tasks", items);
+		if (choice === undefined) return;
+
+		// Agent backgrounded entry
+		if (agentBackgrounded && choice === 0 && items[0].includes("agent")) {
+			await handleBackgroundShortcut(ctx);
+			return;
+		}
+
+		// Find the job \u2014 skip the agent entry if present.
+		const jobOffset = agentBackgrounded ? 1 : 0;
+		const jobIndex = choice - jobOffset;
+		const jobList = [...runningJobs, ...finishedJobs];
+		if (jobIndex >= 0 && jobIndex < jobList.length) {
+			await showTaskDetail(jobList[jobIndex], ctx);
 		}
 	}
 
