@@ -557,7 +557,7 @@ export default function (pi: ExtensionAPI) {
 						if (job) {
 							markJobTerminal(
 								job,
-								code === 0 ? "completed" : "failed",
+								(code === 0 || code === null) ? "completed" : "failed",
 								code ?? 0,
 							);
 							notifyCompletion(job, ctx);
@@ -674,7 +674,7 @@ export default function (pi: ExtensionAPI) {
 			proc.on("close", (code) => {
 				cancelStall();
 				logStream.end();
-				markJobTerminal(job, code === 0 ? "completed" : "failed", code ?? 0);
+				markJobTerminal(job, (code === 0 || code === null) ? "completed" : "failed", code ?? 0);
 
 				if (shouldNotify) {
 					notifyCompletion(job, ctx);
