@@ -189,12 +189,12 @@ interface RunningProcess {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
-function generateJobId(counter: number): string {
-    return `job-${counter}`;
+function generateJobId(counter: number, pid: number = process.pid): string {
+    return `job-${pid}-${counter}`;
 }
 
 function logPathForJob(jobId: string): string {
-    return `/tmp/pi-bg-${process.pid}-${jobId}.log`;
+    return `/tmp/pi-bg-${jobId}.log`;
 }
 
 function formatDuration(ms: number): string {
