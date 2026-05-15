@@ -305,6 +305,7 @@ export default function (pi: ExtensionAPI) {
 	const backgroundJobs = new Map<string, BackgroundJob>();
 	const runningProcesses = new Map<string, RunningProcess>();
 	let jobCounter = 0;
+	let turnCount = 0;
 
 	/** Currently running bash toolCallId (for Ctrl+B). */
 	let currentlyRunningToolCallId: string | null = null;
@@ -947,16 +948,25 @@ export default function (pi: ExtensionAPI) {
 
 	// Background hint: after 2s of agent activity, show the shortcut.
 	pi.on("turn_start", async (_event, ctx) => {
+		turnCount++;
 		if (backgroundHintTimer) clearTimeout(backgroundHintTimer);
 		backgroundHintTimer = setTimeout(() => {
 			ctx.ui.notify("\u23f1 Ctrl+B to background", "info");
 			backgroundHintTimer = undefined;
 		}, 2_000);
 		backgroundHintTimer.unref();
+
+		// Turn progress in status line
+		const spinner = ctx.ui.theme.fg("accent", "\u25cf");
+		ctx.ui.setStatus("tau-turn", spinner + ctx.ui.theme.fg("dim", ` Turn ${turnCount}...`));
 	});
 
-	pi.on("turn_end", async () => {
+	pi.on("turn_end", async (_event, ctx) => {
 		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
+
+		// Turn complete in status line
+		const check = ctx.ui.theme.fg("success", "\u2713");
+		ctx.ui.setStatus("tau-turn", check + ctx.ui.theme.fg("dim", ` Turn ${turnCount} complete`));
 	});
 
 	// ── Commands ───────────────────────────────────────────────────────
@@ -1161,6 +1171,9 @@ export default function (pi: ExtensionAPI) {
 	// ── Lifecycle events ───────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
+		// Status line: ready indicator
+		ctx.ui.setStatus("tau-turn", ctx.ui.theme.fg("dim", "Ready"));
+
 		// Restore persisted state
 		const entries = ctx.sessionManager.getEntries();
 		for (const entry of entries) {
