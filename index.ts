@@ -393,6 +393,41 @@ export default function (pi: ExtensionAPI) {
     let notificationEnabled = true;
     let notificationPersistent = false;
 
+    /** Check macOS system Do Not Disturb / Focus mode using notifyutil.
+     *  Returns true when DnD is active. On non-macOS platforms, always
+     *  returns false. Results are cached for DND_CACHE_MS to avoid
+     *  spawning notifyutil on every agent_end. */
+    const DND_CACHE_MS = 10_000;
+    let dndActive = false;
+    let dndLastCheck = 0;
+
+    async function isSystemDndActive(): Promise<boolean> {
+        if (process.platform !== "darwin") return false;
+
+        const now = Date.now();
+        if (now - dndLastCheck < DND_CACHE_MS) return dndActive;
+
+        return new Promise((resolve) => {
+            execFile(
+                "notifyutil",
+                ["-g", "com.apple.notificationcenterui.dnd"],
+                { timeout: 2000 },
+                (err, stdout) => {
+                    if (err) {
+                        dndActive = false;
+                        dndLastCheck = now;
+                        resolve(false);
+                        return;
+                    }
+                    const match = stdout.match(/\d+$/);
+                    dndActive = match ? match[0] === "1" : false;
+                    dndLastCheck = now;
+                    resolve(dndActive);
+                }
+            );
+        });
+    }
+
     // ── Todo state ───────────────────────────────────────────────────────
 
     interface Todo {
@@ -2283,11 +2318,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
     pi.registerCommand("notifications", {
         description: "Configure notifications (DnD / persistence)",
         handler: async (_args, ctx) => {
+            const systemDnd = await isSystemDndActive();
+
             await ctx.ui.custom((_tui, theme, _kb, done) => {
                 const items: SettingItem[] = [
                     {
                         id: "notifications-enabled",
-                        label: "Enable notifications",
+                        label: "Tau notifications (master switch)",
                         currentValue: notificationEnabled
                             ? "enabled"
                             : "disabled",
@@ -2307,13 +2344,23 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 container.addChild(
                     new (class {
                         render(_width: number) {
-                            return [
+                            const lines = [
                                 theme.fg(
                                     "accent",
                                     theme.bold("Notification Settings")
                                 ),
                                 "",
                             ];
+                            if (systemDnd) {
+                                lines.push(
+                                    theme.fg(
+                                        "warning",
+                                        "  System DnD: active \u2192 suppressed"
+                                    )
+                                );
+                                lines.push("");
+                            }
+                            return lines;
                         }
                         invalidate() {}
                     })()
@@ -2630,11 +2677,14 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
         // ── Notification ────────────────────────────────────────────────
         if (notificationEnabled) {
-            const body = lastAssistantText(event.messages);
-            const notificationBody = body
-                ? truncateNotificationBody(body)
-                : "Ready for input";
-            notify("Pi", notificationBody, notificationPersistent);
+            const inDnd = await isSystemDndActive();
+            if (!inDnd) {
+                const body = lastAssistantText(event.messages);
+                const notificationBody = body
+                    ? truncateNotificationBody(body)
+                    : "Ready for input";
+                notify("Pi", notificationBody, notificationPersistent);
+            }
         }
     });
 
