@@ -1,3 +1,9 @@
+## [1.4.3](https://github.com/Mearman/tau/compare/v1.4.2...v1.4.3) (2026-05-15)
+
+### Bug Fixes
+
+* **bg:** hybrid stdio — pipes for bash, file-backed for bash_bg ([dd60f85](https://github.com/Mearman/tau/commit/dd60f85c94808077be9f847436c4ddf32053b858))
+
 ## [1.4.2](https://github.com/Mearman/tau/compare/v1.4.1...v1.4.2) (2026-05-15)
 
 ### Bug Fixes
