@@ -14,7 +14,7 @@
  * - Native terminal notification on agent_end (OSC 777/99, Windows toast)
  *
  * Tools: bash (overridden), bash_bg, jobs
- * Commands: /bg, /fg, /jobs, /suspend, /resume
+ * Commands: /bg, /fg, /jobs, /suspend, /continue
  * Shortcuts: Ctrl+Shift+B (background/suspend), Ctrl+B (background/suspend), Ctrl+R (resume), Ctrl+J (jobs)
  */
 
@@ -310,7 +310,7 @@ export default function (pi: ExtensionAPI) {
 	let currentlyRunningToolCallId: string | null = null;
 
 	/** Agent suspension state. When true, tool_call events are blocked and the
-	 *  agent is told to stop. /resume or Ctrl+R clears the flag and continues. */
+	 *  agent is told to stop. Ctrl+B again or /continue clears the flag and continues. */
 	let agentSuspended = false;
 
 	// ── Widget / status bar ────────────────────────────────────────────
@@ -808,6 +808,23 @@ export default function (pi: ExtensionAPI) {
 	// ── Keyboard shortcuts ─────────────────────────────────────────────
 
 	async function handleBackgroundShortcut(ctx: UiContext): Promise<void> {
+		// If the agent is suspended, resume it.
+		if (agentSuspended) {
+			agentSuspended = false;
+			ctx.ui.setStatus("agent-suspended", undefined);
+			ctx.ui.notify("\u25b6 Agent resumed", "success");
+
+			pi.sendMessage({
+				customType: "agent-resume",
+				content: "The user has resumed the agent. Continue where you left off.",
+				display: true,
+			}, {
+				deliverAs: "followUp",
+				triggerTurn: true,
+			});
+			return;
+		}
+
 		// If a bash process is running, background it.
 		if (currentlyRunningToolCallId) {
 			const rp = runningProcesses.get(currentlyRunningToolCallId);
@@ -818,23 +835,13 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// Otherwise, suspend the agent loop.
-		if (agentSuspended) {
-			ctx.ui.notify("Agent already suspended", "warning");
-			return;
-		}
-
 		agentSuspended = true;
-		ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+R or /resume to continue.", "info");
+		ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+B again or /continue to resume.", "info");
 		ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
 	}
 
-	pi.registerShortcut("ctrl+shift+b", {
-		description: "Background bash process or suspend agent loop",
-		handler: handleBackgroundShortcut,
-	});
-
 	pi.registerShortcut("ctrl+b", {
-		description: "Background bash process or suspend agent loop",
+		description: "Background bash, suspend agent, or resume suspended agent",
 		handler: handleBackgroundShortcut,
 	});
 
@@ -852,38 +859,36 @@ export default function (pi: ExtensionAPI) {
 
 		return {
 			block: true,
-			reason: "Agent suspended by user. Stop processing and wait for /resume.",
+			reason: "Agent suspended by user. Stop processing and wait for /continue.",
 		};
 	});
 
-	pi.registerShortcut("ctrl+r", {
-		description: "Resume suspended agent",
-		handler: async (ctx) => {
-			if (!agentSuspended) {
-				ctx.ui.notify("Agent is not suspended", "info");
-				return;
-			}
-
-			agentSuspended = false;
-			ctx.ui.setStatus("agent-suspended", undefined);
-			ctx.ui.notify("\u25b6 Agent resumed", "success");
-
-			pi.sendMessage({
-				customType: "agent-resume",
-				content: "The user has resumed the agent. Continue where you left off.",
-				display: true,
-			}, {
-				deliverAs: "followUp",
-				triggerTurn: true,
-			});
-		},
-	});
+	// Resume shortcut (same Ctrl+B — also accessible via /continue command)
+	// The resume logic is inside handleBackgroundShortcut above.
 
 	// ── Commands ───────────────────────────────────────────────────────
 
 	pi.registerCommand("bg", {
-		description: "Background bash process or suspend agent loop",
+		description: "Background bash process, suspend agent, or resume suspended agent",
 		handler: async (_args, ctx) => {
+			// If suspended, resume.
+			if (agentSuspended) {
+				agentSuspended = false;
+				ctx.ui.setStatus("agent-suspended", undefined);
+				ctx.ui.notify("\u25b6 Agent resumed", "success");
+
+				pi.sendMessage({
+					customType: "agent-resume",
+					content: "The user has resumed the agent. Continue where you left off.",
+					display: true,
+				}, {
+					deliverAs: "followUp",
+					triggerTurn: true,
+				});
+				return;
+			}
+
+			// If bash is running, background it.
 			if (currentlyRunningToolCallId) {
 				const rp = runningProcesses.get(currentlyRunningToolCallId);
 				if (rp && !rp.backgrounded) {
@@ -892,13 +897,9 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			if (agentSuspended) {
-				ctx.ui.notify("Agent already suspended", "warning");
-				return;
-			}
-
+			// Otherwise, suspend the agent.
 			agentSuspended = true;
-			ctx.ui.notify("\u23f8 Agent suspended. Use /resume or Ctrl+R to continue.", "info");
+			ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+B again or /continue to resume.", "info");
 			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
 		},
 	});
@@ -972,7 +973,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			agentSuspended = true;
-			ctx.ui.notify("\u23f8 Agent suspended. Use /resume or Ctrl+R to continue.", "info");
+			ctx.ui.notify("\u23f8 Agent suspended. Use Ctrl+B again or /continue to continue.", "info");
 			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
 		},
 	});
