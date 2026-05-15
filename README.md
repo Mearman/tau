@@ -1,8 +1,9 @@
 # Tau (τ) — Quality-of-Life Extension for pi
 
+[![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/Mearman/tau)
 [![npm version](https://img.shields.io/npm/v/pi-tau.svg)](https://www.npmjs.com/package/pi-tau)
-[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Mearman/tau/ci.yml?branch=main)](https://github.com/Mearman/tau/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Mearman/tau/ci.yml?branch=main)](https://github.com/Mearman/tau/actions)
 
 Background tasks, notifications, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
 
