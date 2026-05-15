@@ -9,12 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": [
-    "index.ts",
-    "plan-utils.ts",
-    "commitlint.config.ts",
-    "eslint.config.ts",
-    "lint-staged.config.ts",
-    "release.config.ts"
-  ]
+  "include": ["index.ts", "plan-utils.ts"]
 }
