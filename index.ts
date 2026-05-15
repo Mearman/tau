@@ -13,7 +13,7 @@
  *
  * Tools: bash (overridden), bash_bg, jobs
  * Commands: /bg, /fg, /jobs
- * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks)
+ * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks), Ctrl+X (kill)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -68,9 +68,10 @@ function notify(title: string, body: string): void {
 
 // ─── Configuration ──────────────────────────────────────────────────────
 
-/** Default timeout for bash commands. After this, the process is backgrounded and
- *  the agent is asked whether to let it continue or kill it. */
-const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
+/** Default timeout for foreground bash commands.
+ *  Matches Claude Code's ASSISTANT_BLOCKING_BUDGET_MS (15s). After this,
+ *  the process is backgrounded and the agent is asked whether to kill or continue. */
+const DEFAULT_TIMEOUT_MS = 15_000;
 const STALL_CHECK_INTERVAL_MS = 5_000;
 const STALL_THRESHOLD_MS = 45_000;
 const STALL_TAIL_BYTES = 1024;
@@ -613,8 +614,15 @@ export default function (pi: ExtensionAPI) {
 					});
 				}
 
-				// Default timeout — backgrounds and asks the agent what to do
+				// Default timeout \u2014 backgrounds and asks the agent what to do
 				startTimeoutTimer(rp, ctx);
+
+				// Background hint after 2s of bash execution (matches Claude Code)
+				const hintTimer = setTimeout(() => {
+					ctx.ui.notify("\u23f1 Ctrl+B to background", "info");
+				}, 2_000);
+				hintTimer.unref();
+				rp.proc.on("close", () => clearTimeout(hintTimer));
 			});
 		},
 	});
@@ -816,11 +824,12 @@ export default function (pi: ExtensionAPI) {
 			agentBackgrounded = false;
 			if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
 			ctx.ui.setStatus("agent-backgrounded", undefined);
-			ctx.ui.notify("\u25b6 Agent resumed", "success");
+			updateWidget(ctx);
+			ctx.ui.notify("\u25b6 Resumed", "success");
 
 			pi.sendMessage({
 				customType: "agent-resume",
-				content: "The user has brought you back to the foreground. Continue where you left off.",
+				content: "Continuing where you left off.",
 				display: true,
 			}, {
 				deliverAs: "followUp",
@@ -829,21 +838,26 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		// If a bash process is running, background it.
+		// Background everything: bash process AND agent loop.
+		let didBackgroundBash = false;
 		if (currentlyRunningToolCallId) {
 			const rp = runningProcesses.get(currentlyRunningToolCallId);
 			if (rp && !rp.backgrounded) {
 				backgroundProcess(rp, ctx);
-				return;
+				didBackgroundBash = true;
 			}
 		}
 
-		// Otherwise, background the agent loop.
 		agentBackgrounded = true;
 		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
-		ctx.ui.notify("\u23f8 Agent backgrounded. Ctrl+B to bring back.", "info");
 		ctx.ui.setStatus("agent-backgrounded", ctx.ui.theme.fg("warning", "\u23f8 Backgrounded"));
 		updateWidget(ctx);
+
+		if (didBackgroundBash) {
+			ctx.ui.notify("\u23f8 Backgrounded bash + agent. Ctrl+B to resume.", "info");
+		} else {
+			ctx.ui.notify("\u23f8 Backgrounded. Ctrl+B to resume.", "info");
+		}
 	}
 
 	pi.registerShortcut("ctrl+b", {
@@ -865,6 +879,26 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerShortcut("ctrl+x", {
+		description: "Kill most recent running background task",
+		handler: async (ctx) => {
+			const runningJobs = Array.from(backgroundJobs.values())
+				.filter(j => j.status === "running")
+				.sort((a, b) => b.startTime - a.startTime);
+
+			if (runningJobs.length === 0) {
+				ctx.ui.notify("No running tasks to kill", "warning");
+				return;
+			}
+
+			const job = runningJobs[0];
+			if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
+			markJobTerminal(job, "killed");
+			ctx.ui.notify(`Killed ${job.id}`, "info");
+			updateWidget(ctx);
+		},
+	});
+
 	// ── Agent backgrounding ─────────────────────────────────────────────
 
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
@@ -872,7 +906,7 @@ export default function (pi: ExtensionAPI) {
 
 		return {
 			block: true,
-			reason: "Agent backgrounded by user. Stop processing — the user will bring you back.",
+			reason: "",
 		};
 	});
 
