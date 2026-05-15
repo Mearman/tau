@@ -1,3 +1,9 @@
+## [1.4.2](https://github.com/Mearman/tau/compare/v1.4.1...v1.4.2) (2026-05-15)
+
+### Bug Fixes
+
+* **bg:** embed PID in job ID for cross-instance uniqueness ([c77e29a](https://github.com/Mearman/tau/commit/c77e29a432fa9907e4cb9a9792f876bb345256e1))
+
 ## [1.4.1](https://github.com/Mearman/tau/compare/v1.4.0...v1.4.1) (2026-05-15)
 
 ### Bug Fixes
