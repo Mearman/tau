@@ -1,3 +1,9 @@
+## [1.3.1](https://github.com/Mearman/tau/compare/v1.3.0...v1.3.1) (2026-05-15)
+
+### Bug Fixes
+
+* **bg:** prevent attach from blocking on pending-decision jobs ([a1efd15](https://github.com/Mearman/tau/commit/a1efd15555bc20b8e7cf2fb41d5cb3286d7d1ca7))
+
 ## [1.3.0](https://github.com/Mearman/tau/compare/v1.2.1...v1.3.0) (2026-05-15)
 
 ### Features
