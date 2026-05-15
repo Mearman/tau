@@ -391,6 +391,7 @@ export default function (pi: ExtensionAPI) {
     // ── Notification config ──────────────────────────────────────────────
 
     let notificationPersistent = false;
+    let notificationRespectDnd = true;
 
     /** Check macOS system Do Not Disturb / Focus mode using notifyutil.
      *  Returns true when DnD is active. On non-macOS platforms, always
@@ -2329,6 +2330,14 @@ After completing a step, include a [DONE:n] tag in your response.`,
                             : "auto",
                         values: ["persistent", "auto"],
                     },
+                    {
+                        id: "notifications-respect-dnd",
+                        label: "Respect system DnD",
+                        currentValue: notificationRespectDnd
+                            ? "enabled"
+                            : "disabled",
+                        values: ["enabled", "disabled"],
+                    },
                 ];
 
                 const container = new Container();
@@ -2342,7 +2351,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
                                 ),
                                 "",
                             ];
-                            if (systemDnd) {
+                            if (systemDnd && notificationRespectDnd) {
                                 lines.push(
                                     theme.fg(
                                         "warning",
@@ -2361,10 +2370,15 @@ After completing a step, include a [DONE:n] tag in your response.`,
                     items,
                     Math.min(items.length + 2, 15),
                     getSettingsListTheme(),
-                    (_id, newValue) => {
-                        notificationPersistent = newValue === "persistent";
+                    (_id_2, newValue) => {
+                        if (newValue === "persistent" || newValue === "auto") {
+                            notificationPersistent = newValue === "persistent";
+                        } else {
+                            notificationRespectDnd = newValue === "enabled";
+                        }
                         pi.appendEntry("notifications-config", {
                             persistent: notificationPersistent,
+                            respectDnd: notificationRespectDnd,
                         });
                     },
                     () => {
@@ -2525,10 +2539,15 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 entry.customType === "notifications-config"
             ) {
                 const data = entry.data as
-                    | { enabled?: boolean; persistent?: boolean }
+                    | {
+                          enabled?: boolean;
+                          persistent?: boolean;
+                          respectDnd?: boolean;
+                      }
                     | undefined;
                 if (data) {
                     notificationPersistent = data.persistent ?? false;
+                    notificationRespectDnd = data.respectDnd ?? true;
                 }
                 break;
             }
@@ -2661,7 +2680,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
         }
 
         // ── Notification ────────────────────────────────────────────────
-        const inDnd = await isSystemDndActive();
+        const inDnd = notificationRespectDnd && (await isSystemDndActive());
         if (!inDnd) {
             const body = lastAssistantText(event.messages);
             const notificationBody = body
