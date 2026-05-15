@@ -1,3 +1,9 @@
+## [1.3.0](https://github.com/Mearman/tau/compare/v1.2.1...v1.3.0) (2026-05-15)
+
+### Features
+
+* **notify:** add toggle for respecting system DnD ([5775e6a](https://github.com/Mearman/tau/commit/5775e6a5e358a4c5271fe08267fb8b53bca0ef8f))
+
 ## [1.2.1](https://github.com/Mearman/tau/compare/v1.2.0...v1.2.1) (2026-05-15)
 
 ### Bug Fixes
