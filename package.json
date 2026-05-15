@@ -27,7 +27,7 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test 'src/__tests__/*.test.ts'",
-    "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.test.ts' --test 'src/__tests__/*.test.ts'",
+    "test:coverage": "c8 --all --src src -n 'src/**/*.ts' -x 'src/**/*.test.ts' -x 'src/__tests__/**' pnpm test",
     "check": "tsc --noEmit",
     "lint": "eslint --cache",
     "lint:fix": "eslint --cache --fix",
@@ -49,6 +49,7 @@
     "@semantic-release/git": "10.0.1",
     "@semantic-release/github": "12.0.6",
     "@types/node": "25.6.2",
+    "c8": "^11.0.0",
     "conventional-changelog-conventionalcommits": "9.3.1",
     "eslint": "10.3.0",
     "eslint-config-prettier": "10.1.8",
@@ -60,6 +61,11 @@
     "typebox": "^1.1.24",
     "typescript": "6.0.3",
     "typescript-eslint": "8.59.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "yargs": "^18.0.0"
+    }
   },
   "packageManager": "pnpm@10.33.1"
 }
