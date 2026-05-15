@@ -1,6 +1,6 @@
 {
   "name": "pi-tau",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Quality-of-Life Extension for pi — background tasks, notifications, status lines, and more",
   "type": "module",
   "keywords": [

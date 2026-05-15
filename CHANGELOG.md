@@ -1,3 +1,9 @@
+## [1.4.5](https://github.com/Mearman/tau/compare/v1.4.4...v1.4.5) (2026-05-15)
+
+### Styles
+
+* simplify tsconfig include to src/ directory ([9d5d67f](https://github.com/Mearman/tau/commit/9d5d67fa3646e084d777f0e67bf2487d2b5adee2))
+
 ## [1.4.4](https://github.com/Mearman/tau/compare/v1.4.3...v1.4.4) (2026-05-15)
 
 ### Refactoring
