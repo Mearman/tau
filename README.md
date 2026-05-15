@@ -1,209 +1,159 @@
-# Background Tasks Extension
+# Tau (τ) — Background Tasks Extension for pi
 
-Adds Claude Code-style task backgrounding to pi with **Ctrl+B** support.
+Claude Code-style task backgrounding. One shortcut does everything: **Ctrl+B**.
 
 ## Features
 
-✅ **Ctrl+Shift+B Backgrounding** - Press Ctrl+Shift+B during any running bash command to send it to background  
-✅ **Live Process Monitoring** - Widget shows running jobs with elapsed time  
-✅ **Completion Notifications** - Get alerted when background jobs finish  
-✅ **Output Preservation** - Full stdout/stderr capture for later viewing  
-✅ **Job Management** - Kill, monitor, or view output of any background job  
-✅ **Session Persistence** - Job history survives pi restarts  
-✅ **Dual Mode Support** - Background processes instantly OR mid-execution  
+- **Ctrl+B** — background running bash, background the agent loop, or resume a backgrounded agent
+- **15-second auto-background** — long-running commands are automatically backgrounded with agent confirmation
+- **Agent loop backgrounding** — Ctrl+B during agent processing blocks further tool calls and yields control back to you
+- **Disk-based output** — all background job output written to `/tmp/pi-bg-<jobId>.log`, not memory
+- **Process-group kill** — `process.kill(-pid)` terminates entire process trees
+- **Stall detection** — detects interactive prompts (`(y/n)`, `Press any key`) in background jobs after 45s of stagnant output
+- **Size watchdog** — kills background jobs exceeding 100 MiB output
+- **Background hint** — `⏱ Ctrl+B to background` appears after 2s of bash or agent activity
+- **Pill bar** — `◐ job-1: cmd (12s) · ◐ agent (backgrounded)` in the status area
+- **Task management UI** — Shift+↓ or Ctrl+J opens grouped task list with detail views
+- **Ctrl+X** — kill most recent running background task
+- **Native notifications** — OSC 777/99 (macOS/Linux) or Windows toast on agent completion, showing the last assistant message
+- **Session persistence** — job history survives pi restarts
+- **Zero runtime dependencies** — tree-kill replaced with `process.kill(-pid)`
 
 ## Installation
 
-The extension is automatically loaded from `~/.pi/agent/extensions/background-tasks/`.
-
-Test it's working:
 ```bash
-pi
-# You should see the extension load
-# Try: "Run a test command like 'sleep 10 && echo done'"
-# Press Ctrl+B while it's running
+# Extension lives at ~/.pi/agent/extensions/tau/
+# Source: https://github.com/Mearman/tau (private)
+
+pi  # loads automatically — look for "tau" in extension list
 ```
 
 ## Usage
 
-### 1. Background Running Commands (Ctrl+B)
+### Background a Running Command (Ctrl+B)
 
-```bash
-# Start a long-running command
-"Run npm run build"
+```
+Agent: Running npm build...
+bash: npm run build
+> Building [1/10]...
 
-# While it's executing, press Ctrl+Shift+B
-[Ctrl+Shift+B]
-
-# Output:
-# Process backgrounded as job-1
-# Command: npm run build  
-# PID: 12345
-
-# Continue working while it runs in background
-"What's in package.json?"
+[User presses Ctrl+B]
+⏸ Backgrounded. Ctrl+B to resume.
 ```
 
-### 2. Planned Background Commands
+Both the bash process **and** the agent loop are backgrounded simultaneously. The agent stops processing, and the user regains control.
 
-```bash
-# Start command in background immediately
-"Use bash_bg to run 'python train_model.py --epochs 100'"
+### Resume (Ctrl+B again)
 
-# Or disable notifications  
-"Use bash_bg to run 'cargo build --release' with notify false"
+```
+[User presses Ctrl+B]
+▶ Resumed
+Agent: Continuing where you left off.
 ```
 
-### 3. Job Management
+### Start Command in Background Immediately
 
-```bash
-# List all background jobs
-"Use jobs to list all background jobs"
-
-# Check specific job output
-"Use jobs with action 'output' for job 'job-1'"
-
-# Kill a running job  
-"Use jobs with action 'kill' for job 'job-2'"
-
-# Interactive management
-"/jobs"
+```
+User: Start a build in the background
+Agent: I'll run that in the background immediately.
+bash_bg: cargo build --release
+→ Started background job job-1 (PID 42319)
+→ Output: /tmp/pi-bg-job-1.log
 ```
 
-## UI Elements
+### Auto-Background After 15 Seconds
 
-### Widget Display (Above Editor)
-```
-⏳ job-1: npm run build (2m34s)
-⏳ job-2: python train.py (45m12s)
-```
+Commands running longer than 15 seconds are automatically backgrounded. The agent receives a followUp message asking whether to kill or continue:
 
-### Status Bar
 ```
-🔄 2 running, 1 done, 0 failed
-```
-
-### Notifications
-```
-ℹ️ Process backgrounded as job-1
-✅ Background job job-1 completed (89s)
-❌ Background job job-2 failed (12s)
+⏰ Command timed out after 15s and has been backgrounded as job-3.
+Choose one:
+- Use the jobs tool with action "kill" and jobId "job-3" to terminate it.
+- Use the jobs tool with action "output" and jobId "job-3" to check progress.
+- Do nothing and it will continue running in the background.
 ```
 
-## Tools Available to LLM
+### Task Management (Shift+↓ or Ctrl+J)
 
-| Tool | Purpose | Parameters |
-|------|---------|------------|
-| `bash` | Enhanced with backgrounding support | `command` (use Ctrl+Shift+B to background) |
-| `bash_bg` | Start command in background immediately | `command`, `notify?` |
-| `jobs` | Manage background jobs | `action`: "list"/"kill"/"output", `jobId?` |
+```
+Background Tasks
+  ◐ agent · backgrounded · Ctrl+B to resume
+  ◐ job-3: npm build · 45s
+  ✅ job-1: sleep 10 · completed
+  ❌ job-2: pi --model · failed
+```
+
+Select a task to see detail view with actions: attach, show output, kill.
+
+### Kill Most Recent Task (Ctrl+X)
+
+Instantly terminates the most recently started running background task.
+
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `bash` | Standard bash, enhanced with 15s auto-background timeout and Ctrl+B support |
+| `bash_bg` | Start a command in the background immediately |
+| `jobs` | `list`, `output`, `kill`, or `attach` to background jobs |
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `/jobs` | Interactive job management UI |
+| `/bg` | Same as Ctrl+B — background bash/agent or resume |
+| `/fg` | Attach to a background job, optionally with `--snapshot` |
+| `/jobs` | Open task management interface |
 
-## Keyboard Shortcuts
+## Shortcuts
 
 | Shortcut | Action |
-|----------|---------|
-| `Ctrl+Shift+B` | Background current running bash process |
-| `Ctrl+J` | Open background jobs interface |
+|----------|--------|
+| `Ctrl+B` | Background running bash + agent, or resume backgrounded agent |
+| `Ctrl+X` | Kill most recent running background task |
+| `Ctrl+J` / `Shift+↓` | Open task management interface |
 
-## Example Session
+## Architecture
 
 ```
-User: Run a build that takes forever
-Agent: I'll start the build process for you.
+User presses Ctrl+B
+       │
+       ├─ Bash process running?
+       │   YES → backgroundProcess()
+       │         - Remove foreground data listeners
+       │         - Pipe stdout/stderr to /tmp/pi-bg-<jobId>.log
+       │         - Unref child process
+       │         - Resolve bash tool promise with backgrounded status
+       │
+       └─ Set agentBackgrounded = true
+           - tool_call handler returns block:true
+           - Agent's current turn finishes
+           - Loop stops (no more tool calls execute)
+           - User gets fresh input line
 
-bash: npm run build
-> Building application...
-> [1/10] Compiling...
-
-[User presses Ctrl+Shift+B]
-
-Process backgrounded as job-1
-Command: npm run build
-PID: 12345
-
-User: While that builds, show me the git log  
-Agent: I'll check the git history while your build continues in the background.
-
-bash: git log --oneline -5
-a1b2c3d Fix authentication bug
-d4e5f6g Add input validation
-...
-
-[Widget shows: ⏳ job-1: npm run build (1m23s)]
-
-User: How's the build going?
-Agent: Let me check the build output for you.
-
-jobs: list
-Background Jobs:
-job-1: npm run build - ⏳ running (1m45s)
-
-[Notification: ✅ Background job job-1 completed (2m12s)]
-
-User: Great! What was the output?
-Agent: Let me show you the complete build output.
-
-jobs: output job-1
-Output for job-1:
-Command: npm run build
-Status: completed
-
-> Building application...
-> [10/10] Optimizing bundle...
-> ✅ Build completed successfully!
-> Bundle size: 2.3MB
-> Build time: 2m10s
+User presses Ctrl+B again
+       │
+       └─ agentBackgrounded = false
+           - pi.sendMessage({ content: "Continuing..." }, { triggerTurn: true })
+           - Agent starts new loop with full conversation context
 ```
 
-## Implementation Details
+### Key Design Decisions
 
-### Process Management
-- **Hijacks built-in bash tool** to add backgrounding capability
-- **Preserves streaming output** before backgrounding  
-- **Process isolation** - background jobs don't interfere with each other
-- **Clean shutdown** - terminates all background processes on exit
+- **Disk over memory**: Output goes to files, not in-memory buffers. Survives crashes, no memory pressure on long-running tasks.
+- **Process groups over tree-kill**: `process.kill(-pid)` kills the entire group when spawned with `detached: true`. No external dependency needed.
+- **Block over pause**: The agent loop can't be truly backgrounded (it runs in-process). Tool call blocking is the closest approximation. The agent sees an empty block reason and stops cleanly.
+- **15s timeout**: Matches Claude Code's `ASSISTANT_BLOCKING_BUDGET_MS`. Commands that need longer should use `bash_bg`.
 
-### State Tracking
-- **In-memory job registry** for active management
-- **Session persistence** via `appendEntry()` for job history
-- **PID tracking** for process control and monitoring
-- **Output buffering** for complete capture
+## Known Limitations
 
-### Error Handling
-- **Process spawn failures** reported immediately
-- **Background job crashes** logged and notified
-- **Signal handling** for clean termination
-- **State corruption recovery** on session restart
+These require changes to pi core (see [implementation path note](obsidian://open?vault=Notebook&file=Resources%2Fdevelopment%2Fai-integration%2Fcoding-agents%2Fpi-cli%2FTau%20Extension%20%E2%80%94%20Unsolved%20UX%20Gaps%20and%20pi-mono%20Implementation%20Path)):
 
-## Troubleshooting
+1. **Agent doesn't keep running in background** — tool calls are blocked, the loop pauses. True background execution needs an `AgentLoopHandle` API in pi core.
+2. **No click handlers on pill bar** — `setWidget()` renders static text. No way to register click callbacks.
+3. **No Ctrl+X inside dialogs** — `select()` doesn't support custom keybindings. Can only navigate with ↑/↓/Enter.
+4. **No live output streaming** — `editor()` shows a static snapshot. No file-tail component available.
 
-### "No running bash process to background"
-- Only bash commands can be backgrounded with Ctrl+Shift+B
-- Make sure a bash command is actively running when you press Ctrl+Shift+B
+## Licence
 
-### Background jobs not showing in widget  
-- Widget only shows currently running jobs
-- Completed/failed jobs are hidden but accessible via `/jobs` command
-
-### Jobs lost after restart
-- Only completed/failed job history is preserved across restarts
-- Running jobs cannot be restored and will be terminated on shutdown
-
-### Process won't die with kill action
-- Some processes ignore SIGTERM - try `kill -9` manually
-- Check if process has child processes that need separate termination
-
-## Future Enhancements
-
-- [ ] Process priority management  
-- [ ] Resource usage monitoring (CPU/memory)
-- [ ] Job scheduling and queuing
-- [ ] Multi-server job distribution
-- [ ] Log rotation for long-running jobs
-- [ ] Job dependency management
+Private — [github.com/Mearman/tau](https://github.com/Mearman/tau)
