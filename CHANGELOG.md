@@ -1,3 +1,9 @@
+## [1.0.2](https://github.com/Mearman/tau/compare/v1.0.1...v1.0.2) (2026-05-15)
+
+### Documentation
+
+* align badge style with schema-components ([a483d1a](https://github.com/Mearman/tau/commit/a483d1a094cb853ab0df06a679f2674badc3fe81))
+
 ## [1.0.1](https://github.com/Mearman/tau/compare/v1.0.0...v1.0.1) (2026-05-15)
 
 ### Bug Fixes
