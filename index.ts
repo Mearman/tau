@@ -1,21 +1,19 @@
 /**
  * Tau (τ) — Background Tasks Extension for pi
  *
- * Enhances the built-in bash tool with background execution support:
- * - Ctrl+Shift+B to background the currently running bash process
- * - 2-minute default timeout: backgrounds and asks the agent whether to kill or continue
- * - Output written to disk files (/tmp/pi-bg-<jobId>.log), not memory buffers
+ * Aligns with Claude Code's Ctrl+B background UX:
+ * - Ctrl+B backgrounds bash processes, backgrounds the agent loop, or resumes
+ * - Background hint after 2s of agent activity
+ * - 2-minute default timeout: auto-backgrounds and asks the agent to decide
+ * - Pill bar at the bottom showing running background tasks
+ * - Output written to disk files (/tmp/pi-bg-<jobId>.log)
  * - Process-group kill via process.kill(-pid)
- * - Stall detection: if output hasn't grown for 45s and the tail looks like an
- *   interactive prompt ((y/n), Press any key, Continue?), notify the agent
- * - Size watchdog: kills jobs exceeding 100 MiB output
- * - Working status bar widget showing running jobs
- * - Structured completion notifications via pi.sendMessage
- * - Native terminal notification on agent_end (OSC 777/99, Windows toast)
+ * - Stall detection and size watchdog
+ * - Native terminal notification on agent_end
  *
  * Tools: bash (overridden), bash_bg, jobs
- * Commands: /bg, /fg, /jobs, /suspend, /continue
- * Shortcuts: Ctrl+Shift+B (background/suspend), Ctrl+B (background/suspend), Ctrl+R (resume), Ctrl+J (jobs)
+ * Commands: /bg, /fg, /jobs
+ * Shortcuts: Ctrl+B (background/resume), Ctrl+J (jobs)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -306,36 +304,41 @@ export default function (pi: ExtensionAPI) {
 	const runningProcesses = new Map<string, RunningProcess>();
 	let jobCounter = 0;
 
-	/** Currently running bash toolCallId (for Ctrl+Shift+B) */
+	/** Currently running bash toolCallId (for Ctrl+B). */
 	let currentlyRunningToolCallId: string | null = null;
 
-	/** Agent suspension state. When true, tool_call events are blocked and the
-	 *  agent is told to stop. Ctrl+B again or /continue clears the flag and continues. */
-	let agentSuspended = false;
+	/** Agent background state. When true, tool_call events are blocked so the
+	 *  agent yields control back to the user. Ctrl+B again resumes. */
+	let agentBackgrounded = false;
+
+	/** Timer for the background hint shown after 2s of agent activity. */
+	let backgroundHintTimer: NodeJS.Timeout | undefined;
 
 	// ── Widget / status bar ────────────────────────────────────────────
 
 	function updateWidget(ctx: UiContext): void {
-		const runningJobs = Array.from(backgroundJobs.values())
-			.filter(job => job.status === "running");
+		const allJobs = Array.from(backgroundJobs.values());
+		const runningJobs = allJobs.filter(job => job.status === "running");
 
-		if (runningJobs.length === 0) {
+		if (runningJobs.length === 0 && !agentBackgrounded) {
 			ctx.ui.setWidget("background-jobs", undefined);
 			ctx.ui.setStatus("background-jobs", undefined);
 			return;
 		}
 
-		const lines = runningJobs.map(job => {
+		// Pill bar: ◐ job-1: cmd (12s) · ◐ job-2: cmd (8s)
+		const pills: string[] = [];
+		if (agentBackgrounded) {
+			pills.push("◐ agent (backgrounded)");
+		}
+		for (const job of runningJobs) {
 			const duration = formatDuration(Date.now() - job.startTime);
-			return `⏳ ${job.id}: ${job.command.slice(0, 35)} (${duration})`;
-		});
+			pills.push(`◐ ${job.id}: ${job.command.slice(0, 25)} (${duration})`);
+		}
+		ctx.ui.setWidget("background-jobs", pills);
 
-		ctx.ui.setWidget("background-jobs", lines);
-
-		const completedJobs = Array.from(backgroundJobs.values())
-			.filter(job => job.status === "completed").length;
-		const failedJobs = Array.from(backgroundJobs.values())
-			.filter(job => job.status === "failed").length;
+		const completedJobs = allJobs.filter(job => job.status === "completed").length;
+		const failedJobs = allJobs.filter(job => job.status === "failed").length;
 
 		let statusText = `${runningJobs.length} running`;
 		if (completedJobs > 0) statusText += `, ${completedJobs} done`;
@@ -343,7 +346,7 @@ export default function (pi: ExtensionAPI) {
 
 		ctx.ui.setStatus(
 			"background-jobs",
-			ctx.ui.theme.fg("accent", `🔄 ${statusText}`),
+			ctx.ui.theme.fg("accent", `◐ ${statusText}`),
 		);
 	}
 
@@ -808,15 +811,16 @@ export default function (pi: ExtensionAPI) {
 	// ── Keyboard shortcuts ─────────────────────────────────────────────
 
 	async function handleBackgroundShortcut(ctx: UiContext): Promise<void> {
-		// If the agent is suspended, resume it.
-		if (agentSuspended) {
-			agentSuspended = false;
-			ctx.ui.setStatus("agent-suspended", undefined);
+		// If the agent is backgrounded, bring it back.
+		if (agentBackgrounded) {
+			agentBackgrounded = false;
+			if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
+			ctx.ui.setStatus("agent-backgrounded", undefined);
 			ctx.ui.notify("\u25b6 Agent resumed", "success");
 
 			pi.sendMessage({
 				customType: "agent-resume",
-				content: "The user has resumed the agent. Continue where you left off.",
+				content: "The user has brought you back to the foreground. Continue where you left off.",
 				display: true,
 			}, {
 				deliverAs: "followUp",
@@ -834,73 +838,57 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// Otherwise, suspend the agent loop.
-		agentSuspended = true;
-		ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+B again or /continue to resume.", "info");
-		ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
+		// Otherwise, background the agent loop.
+		agentBackgrounded = true;
+		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
+		ctx.ui.notify("\u23f8 Agent backgrounded. Ctrl+B to bring back.", "info");
+		ctx.ui.setStatus("agent-backgrounded", ctx.ui.theme.fg("warning", "\u23f8 Backgrounded"));
+		updateWidget(ctx);
 	}
 
 	pi.registerShortcut("ctrl+b", {
-		description: "Background bash, suspend agent, or resume suspended agent",
+		description: "Background bash/agent, or resume backgrounded agent",
 		handler: handleBackgroundShortcut,
 	});
 
 	pi.registerShortcut("ctrl+j", {
-		description: "Open background jobs interface",
+		description: "Open background tasks",
 		handler: async (ctx) => {
 			await showJobsInterface(ctx);
 		},
 	});
 
-	// ── Agent suspension ───────────────────────────────────────────────
+	// ── Agent backgrounding ─────────────────────────────────────────────
 
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
-		if (!agentSuspended) return {};
+		if (!agentBackgrounded) return {};
 
 		return {
 			block: true,
-			reason: "Agent suspended by user. Stop processing and wait for /continue.",
+			reason: "Agent backgrounded by user. Stop processing — the user will bring you back.",
 		};
 	});
 
-	// Resume shortcut (same Ctrl+B — also accessible via /continue command)
-	// The resume logic is inside handleBackgroundShortcut above.
+	// Background hint: after 2s of agent activity, show the shortcut.
+	pi.on("turn_start", async (_event, ctx) => {
+		if (backgroundHintTimer) clearTimeout(backgroundHintTimer);
+		backgroundHintTimer = setTimeout(() => {
+			ctx.ui.notify("\u23f1 Ctrl+B to background", "info");
+			backgroundHintTimer = undefined;
+		}, 2_000);
+		backgroundHintTimer.unref();
+	});
+
+	pi.on("turn_end", async () => {
+		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
+	});
 
 	// ── Commands ───────────────────────────────────────────────────────
 
 	pi.registerCommand("bg", {
-		description: "Background bash process, suspend agent, or resume suspended agent",
+		description: "Background bash/agent, or resume backgrounded agent",
 		handler: async (_args, ctx) => {
-			// If suspended, resume.
-			if (agentSuspended) {
-				agentSuspended = false;
-				ctx.ui.setStatus("agent-suspended", undefined);
-				ctx.ui.notify("\u25b6 Agent resumed", "success");
-
-				pi.sendMessage({
-					customType: "agent-resume",
-					content: "The user has resumed the agent. Continue where you left off.",
-					display: true,
-				}, {
-					deliverAs: "followUp",
-					triggerTurn: true,
-				});
-				return;
-			}
-
-			// If bash is running, background it.
-			if (currentlyRunningToolCallId) {
-				const rp = runningProcesses.get(currentlyRunningToolCallId);
-				if (rp && !rp.backgrounded) {
-					backgroundProcess(rp, ctx);
-					return;
-				}
-			}
-
-			// Otherwise, suspend the agent.
-			agentSuspended = true;
-			ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+B again or /continue to resume.", "info");
-			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
+			await handleBackgroundShortcut(ctx);
 		},
 	});
 
@@ -959,44 +947,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("jobs", {
-		description: "Show and manage background jobs interactively",
+		description: "Show and manage background tasks",
 		handler: async (_args, ctx) => {
 			await showJobsInterface(ctx);
-		},
-	});
-
-	pi.registerCommand("suspend", {
-		description: "Suspend the agent loop (block further tool calls)",
-		handler: async (_args, ctx) => {
-			if (agentSuspended) {
-				ctx.ui.notify("Agent already suspended", "warning");
-				return;
-			}
-			agentSuspended = true;
-			ctx.ui.notify("\u23f8 Agent suspended. Use Ctrl+B again or /continue to continue.", "info");
-			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
-		},
-	});
-
-	pi.registerCommand("resume", {
-		description: "Resume the suspended agent loop",
-		handler: async (_args, ctx) => {
-			if (!agentSuspended) {
-				ctx.ui.notify("Agent is not suspended", "info");
-				return;
-			}
-			agentSuspended = false;
-			ctx.ui.setStatus("agent-suspended", undefined);
-			ctx.ui.notify("\u25b6 Agent resumed", "success");
-
-			pi.sendMessage({
-				customType: "agent-resume",
-				content: "The user has resumed the agent. Continue where you left off.",
-				display: true,
-			}, {
-				deliverAs: "followUp",
-				triggerTurn: true,
-			});
 		},
 	});
 
