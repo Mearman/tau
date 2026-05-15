@@ -5,12 +5,13 @@
  * - Ctrl+Shift+B to background the currently running bash process
  * - 2-minute default timeout: backgrounds and asks the agent whether to kill or continue
  * - Output written to disk files (/tmp/pi-bg-<jobId>.log), not memory buffers
- * - Process-group kill via tree-kill
+ * - Process-group kill via process.kill(-pid)
  * - Stall detection: if output hasn't grown for 45s and the tail looks like an
  *   interactive prompt ((y/n), Press any key, Continue?), notify the agent
  * - Size watchdog: kills jobs exceeding 100 MiB output
  * - Working status bar widget showing running jobs
  * - Structured completion notifications via pi.sendMessage
+ * - Native terminal notification on agent_end (OSC 777/99, Windows toast)
  *
  * Tools: bash (overridden), bash_bg, jobs
  * Commands: /bg, /fg, /jobs
@@ -37,6 +38,33 @@ function killProcessGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void
 	} catch {
 		// Process group kill failed — try just the parent.
 		try { process.kill(pid, signal); } catch { /* already dead */ }
+	}
+}
+
+// ─── Terminal notifications ──────────────────────────────────────────
+
+function windowsToastScript(title: string, body: string): string {
+	const type = "Windows.UI.Notifications";
+	const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
+	const template = `[${type}.ToastTemplateType]::ToastText01`;
+	const toast = `[${type}.ToastNotification]::new($xml)`;
+	return [
+		`${mgr} > $null`,
+		`$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
+		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('${body}')) > $null`,
+		`[${type}.ToastNotificationManager]::CreateToastNotifier('${title}').Show(${toast})`,
+	].join("; ");
+}
+
+function notify(title: string, body: string): void {
+	if (process.env.WT_SESSION) {
+		const { execFile } = require("child_process");
+		execFile("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)]);
+	} else if (process.env.KITTY_WINDOW_ID) {
+		process.stdout.write(`\x1b]99;i=1:d=0;${title}\x1b\\`);
+		process.stdout.write(`\x1b]99;i=1:p=body;${body}\x1b\\`);
+	} else {
+		process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
 	}
 }
 
@@ -996,6 +1024,10 @@ export default function (pi: ExtensionAPI) {
 				break;
 			}
 		}
+	});
+
+	pi.on("agent_end", async () => {
+		notify("Pi", "Ready for input");
 	});
 
 	pi.on("session_shutdown", async () => {
