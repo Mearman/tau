@@ -31,15 +31,6 @@ Background tasks, notifications, and other enhancements for the pi agent loop. M
 - **Last agent message** shown in the notification body (first line, max 200 chars)
 - **Replaces the standalone `notify.ts` extension**
 
-## Installation
-
-```bash
-# Extension lives at ~/.pi/agent/extensions/tau/
-# Source: https://github.com/Mearman/tau (private)
-
-pi  # loads automatically — look for "tau" in extension list
-```
-
 ## Usage
 
 ### Background a Running Command (Ctrl+B)
@@ -168,6 +159,8 @@ These require changes to pi core (see [implementation path note](obsidian://open
 
 ## Installation
 
+### From npm
+
 ```bash
 pi install npm:pi-tau
 ```
@@ -178,6 +171,19 @@ Or add to `~/.pi/agent/settings.json`:
 {
   "packages": ["npm:pi-tau"]
 }
+```
+
+### From GitHub
+
+```bash
+pi install github:Mearman/tau
+```
+
+Or clone directly into the extensions directory:
+
+```bash
+git clone https://github.com/Mearman/tau.git ~/.pi/agent/extensions/tau
+cd ~/.pi/agent/extensions/tau && pnpm install
 ```
 
 ## Licence
