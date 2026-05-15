@@ -306,6 +306,8 @@ export default function (pi: ExtensionAPI) {
 	const runningProcesses = new Map<string, RunningProcess>();
 	let jobCounter = 0;
 	let turnCount = 0;
+	let agentStartTime: number | undefined;
+	let agentTimer: ReturnType<typeof setInterval> | null = null;
 
 	/** Currently running bash toolCallId (for Ctrl+B). */
 	let currentlyRunningToolCallId: string | null = null;
@@ -935,6 +937,15 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", async (_event, ctx) => {
 		startTitlebarSpinner(ctx);
+		agentStartTime = Date.now();
+
+		// Update status line every second with elapsed time.
+		agentTimer = setInterval(() => {
+			if (agentStartTime === undefined) return;
+			const elapsed = formatDuration(Date.now() - agentStartTime);
+			const spinner = ctx.ui.theme.fg("accent", "\u25cf");
+			ctx.ui.setStatus("tau-turn", spinner + ctx.ui.theme.fg("dim", ` ${elapsed}`));
+		}, 1_000);
 	});
 
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
@@ -955,18 +966,10 @@ export default function (pi: ExtensionAPI) {
 			backgroundHintTimer = undefined;
 		}, 2_000);
 		backgroundHintTimer.unref();
-
-		// Turn progress in status line
-		const spinner = ctx.ui.theme.fg("accent", "\u25cf");
-		ctx.ui.setStatus("tau-turn", spinner + ctx.ui.theme.fg("dim", ` Turn ${turnCount}...`));
 	});
 
-	pi.on("turn_end", async (_event, ctx) => {
+	pi.on("turn_end", async () => {
 		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
-
-		// Turn complete in status line
-		const check = ctx.ui.theme.fg("success", "\u2713");
-		ctx.ui.setStatus("tau-turn", check + ctx.ui.theme.fg("dim", ` Turn ${turnCount} complete`));
 	});
 
 	// ── Commands ───────────────────────────────────────────────────────
@@ -1224,6 +1227,15 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_end", async (event, ctx) => {
 		stopTitlebarSpinner(ctx);
+
+		// Stop the elapsed timer and show final duration.
+		if (agentTimer) { clearInterval(agentTimer); agentTimer = null; }
+		if (agentStartTime !== undefined) {
+			const elapsed = formatDuration(Date.now() - agentStartTime);
+			const check = ctx.ui.theme.fg("success", "\u2713");
+			ctx.ui.setStatus("tau-turn", check + ctx.ui.theme.fg("dim", ` ${elapsed}`));
+			agentStartTime = undefined;
+		}
 
 		const body = lastAssistantText(event.messages);
 		const notificationBody = body ? truncateNotificationBody(body) : "Ready for input";
