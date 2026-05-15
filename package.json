@@ -1,0 +1,7 @@
+{
+  "name": "tau",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "25.8.0"
+  }
+}
