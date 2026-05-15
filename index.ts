@@ -6,7 +6,7 @@
  * - Background hint after 2s of agent activity
  * - 15s default timeout: auto-backgrounds and asks the agent to decide
  * - Pill bar at the bottom showing running background tasks
- * - Output written to disk files (/tmp/pi-bg-<jobId>.log)
+ * - Output written to disk files (/tmp/pi-bg-<pid>-<jobId>.log)
  * - Process-group kill via process.kill(-pid)
  * - Stall detection and size watchdog
  *
@@ -194,7 +194,7 @@ function generateJobId(counter: number): string {
 }
 
 function logPathForJob(jobId: string): string {
-    return `/tmp/pi-bg-${jobId}.log`;
+    return `/tmp/pi-bg-${process.pid}-${jobId}.log`;
 }
 
 function formatDuration(ms: number): string {
@@ -828,7 +828,7 @@ export default function (pi: ExtensionAPI) {
             "Execute bash commands with streaming output. Commands that run longer than 2 minutes " +
             "are automatically backgrounded and the agent is asked whether to kill or let them continue. " +
             "Use Ctrl+Shift+B to manually background a running process. " +
-            "Background job output is written to /tmp/pi-bg-<jobId>.log.",
+            "Background job output is written to per-session log files.",
         promptSnippet:
             "Execute shell commands (backgroundable with Ctrl+Shift+B)",
         promptGuidelines: [
@@ -1020,7 +1020,7 @@ export default function (pi: ExtensionAPI) {
         name: "bash_bg",
         label: "Background Bash",
         description:
-            "Run a bash command in background immediately. Output is written to /tmp/pi-bg-<jobId>.log. " +
+            "Run a bash command in background immediately. Output is written to a per-session log file. " +
             "Use the jobs tool to check status and read output.",
         promptSnippet:
             "Run bash command in background without blocking conversation",
