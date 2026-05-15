@@ -43,14 +43,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { Key } from "@earendil-works/pi-tui";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import {
-    createWriteStream,
-    statSync,
-    openSync,
-    readSync,
-    closeSync,
-    type WriteStream,
-} from "node:fs";
+import { statSync, openSync, readSync, closeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -184,11 +177,12 @@ interface RunningProcess {
     proc: ChildProcess;
     command: string;
     backgrounded: boolean;
-    /** Listener references so they can be removed on background. */
-    stdoutListener?: (data: Buffer) => void;
-    stderrListener?: (data: Buffer) => void;
-    /** Log file stream, created when the process is backgrounded. */
-    logStream?: WriteStream;
+    /** File descriptor for stdout/stderr log file (kernel writes directly). */
+    logFd?: number;
+    /** Polling interval for reading foreground output from the log file. */
+    pollTimer?: ReturnType<typeof setInterval>;
+    /** Bytes read so far — next poll starts from this offset. */
+    lastReadOffset: number;
     resolve?: (result: AgentToolResult<BashToolDetails | undefined>) => void;
     reject?: (error: Error) => void;
 }
@@ -590,7 +584,7 @@ export default function (pi: ExtensionAPI) {
 
     function backgroundProcess(rp: RunningProcess, ctx: UiContext): void {
         const jobId = generateJobId(++jobCounter);
-        const path = logPathForJob(jobId);
+        const logPath = logPathForJob(jobId);
 
         const job: BackgroundJob = {
             id: jobId,
@@ -598,7 +592,7 @@ export default function (pi: ExtensionAPI) {
             pid: rp.proc.pid!,
             startTime: Date.now(),
             status: "running",
-            logPath: path,
+            logPath: logPath,
             proc: rp.proc,
             toolCallId: rp.toolCallId,
         };
@@ -608,22 +602,17 @@ export default function (pi: ExtensionAPI) {
         backgroundJobs.set(jobId, job);
         currentlyRunningToolCallId = null;
 
-        // Remove the foreground data listeners so output goes to file only.
-        if (rp.stdoutListener)
-            rp.proc.stdout?.removeListener("data", rp.stdoutListener);
-        if (rp.stderrListener)
-            rp.proc.stderr?.removeListener("data", rp.stderrListener);
-
-        // Pipe remaining output to the log file.
-        rp.logStream = createWriteStream(path, { flags: "w" });
-        rp.proc.stdout?.pipe(rp.logStream, { end: false });
-        rp.proc.stderr?.pipe(rp.logStream, { end: false });
+        // Stop polling — output is already going to the log file.
+        if (rp.pollTimer) {
+            clearInterval(rp.pollTimer);
+            rp.pollTimer = undefined;
+        }
 
         // Start stall watchdog (with kill-on-oversize)
         const cancelStall = startStallWatchdog(
             jobId,
             rp.command,
-            path,
+            logPath,
             pi,
             () => {
                 if (rp.proc.pid) killProcessGroup(rp.proc.pid, "SIGTERM");
@@ -631,13 +620,9 @@ export default function (pi: ExtensionAPI) {
             }
         );
 
-        // Close the log file when the process exits.
+        // Clean up watchdog when the process exits.
         rp.proc.on("close", () => {
             cancelStall();
-            if (rp.logStream) {
-                rp.logStream.end();
-                rp.logStream = undefined;
-            }
         });
 
         // Resolve the original tool call immediately with backgrounded status
@@ -646,7 +631,7 @@ export default function (pi: ExtensionAPI) {
                 content: [
                     {
                         type: "text" as const,
-                        text: `Process backgrounded as ${jobId}\nCommand: ${rp.command}\nPID: ${job.pid}\nOutput: ${path}`,
+                        text: `Process backgrounded as ${jobId}\nCommand: ${rp.command}\nPID: ${job.pid}\nOutput: ${logPath}`,
                     },
                 ],
                 details: undefined,
@@ -863,23 +848,38 @@ export default function (pi: ExtensionAPI) {
 
             return new Promise<AgentToolResult<BashToolDetails | undefined>>(
                 (resolve, reject) => {
+                    // Pre-allocate a log file and spawn with file-backed stdio.
+                    // The kernel writes stdout/stderr directly to the fd — no
+                    // Node pipes, so the child survives parent exit.
+                    const jobId = generateJobId(jobCounter + 1);
+                    const logPath = logPathForJob(jobId);
+                    const logFd = openSync(logPath, "w");
+
                     const proc = spawn("bash", ["-c", command], {
-                        stdio: ["pipe", "pipe", "pipe"],
+                        stdio: ["pipe", logFd, logFd],
                         cwd: ctx.cwd,
                         detached: true,
                         env: { ...process.env },
                     });
+
+                    // Parent's copy of the fd is no longer needed — the child
+                    // has its own from fork(2).
+                    closeSync(logFd);
 
                     if (!proc.pid) {
                         reject(new Error("Failed to spawn process"));
                         return;
                     }
 
+                    // Claim the jobId now that we know spawn succeeded
+                    jobCounter++;
+
                     const rp: RunningProcess = {
                         toolCallId,
                         proc,
                         command,
                         backgrounded: false,
+                        lastReadOffset: 0,
                         resolve,
                         reject,
                     };
@@ -887,52 +887,49 @@ export default function (pi: ExtensionAPI) {
                     runningProcesses.set(toolCallId, rp);
                     currentlyRunningToolCallId = toolCallId;
 
-                    let output = "";
-                    let outputFd:
-                        | ReturnType<typeof createWriteStream>
-                        | undefined;
-
-                    // Stream handler — accumulates output for foreground streaming.
-                    // Listeners are removed by backgroundProcess() when the process is backgrounded.
-                    function handleData(
-                        data: Buffer,
-                        _stream: "stdout" | "stderr"
-                    ): void {
-                        const chunk = data.toString();
-                        output += chunk;
-
-                        // Foreground streaming
-                        onUpdate?.({
-                            content: [{ type: "text" as const, text: output }],
-                            details: undefined,
-                        });
-                    }
-
-                    // Store listener references so backgroundProcess() can remove them later.
-                    const stdoutListener = (data: Buffer) => {
-                        handleData(data, "stdout");
-                    };
-                    const stderrListener = (data: Buffer) => {
-                        handleData(data, "stderr");
-                    };
-                    rp.stdoutListener = stdoutListener;
-                    rp.stderrListener = stderrListener;
-                    proc.stdout?.on("data", stdoutListener);
-                    proc.stderr?.on("data", stderrListener);
+                    // Poll the log file for foreground output. The child writes
+                    // directly to the file, so we tail it to feed onUpdate.
+                    let lastOutput = "";
+                    const pollTimer = setInterval(() => {
+                        if (rp.backgrounded) return;
+                        try {
+                            const { size } = statSync(logPath);
+                            if (size <= rp.lastReadOffset) return;
+                            const fd = openSync(logPath, "r");
+                            try {
+                                const toRead = size - rp.lastReadOffset;
+                                const buf = Buffer.alloc(toRead);
+                                readSync(fd, buf, 0, toRead, rp.lastReadOffset);
+                                lastOutput += buf.toString("utf-8");
+                                rp.lastReadOffset = size;
+                            } finally {
+                                closeSync(fd);
+                            }
+                            onUpdate?.({
+                                content: [
+                                    { type: "text" as const, text: lastOutput },
+                                ],
+                                details: undefined,
+                            });
+                        } catch {
+                            /* file not ready yet */
+                        }
+                    }, 200);
+                    pollTimer.unref();
+                    rp.pollTimer = pollTimer;
 
                     proc.on("close", (code) => {
+                        clearInterval(pollTimer);
                         runningProcesses.delete(toolCallId);
                         if (currentlyRunningToolCallId === toolCallId) {
                             currentlyRunningToolCallId = null;
                         }
-                        if (outputFd) {
-                            outputFd.end();
-                            outputFd = undefined;
-                        }
-                        if (rp.logStream) {
-                            rp.logStream.end();
-                            rp.logStream = undefined;
-                        }
+
+                        // Final read to capture any output between last poll and exit
+                        const finalOutput = readOutputTailSync(
+                            logPath,
+                            MAX_OUTPUT_PREVIEW_CHARS
+                        );
 
                         if (rp.backgrounded) {
                             const job = Array.from(
@@ -956,7 +953,7 @@ export default function (pi: ExtensionAPI) {
                                 content: [
                                     {
                                         type: "text" as const,
-                                        text: output || "(no output)",
+                                        text: finalOutput || "(no output)",
                                     },
                                 ],
                                 details: undefined,
@@ -965,17 +962,10 @@ export default function (pi: ExtensionAPI) {
                     });
 
                     proc.on("error", (err) => {
+                        clearInterval(pollTimer);
                         runningProcesses.delete(toolCallId);
                         if (currentlyRunningToolCallId === toolCallId) {
                             currentlyRunningToolCallId = null;
-                        }
-                        if (outputFd) {
-                            outputFd.end();
-                            outputFd = undefined;
-                        }
-                        if (rp.logStream) {
-                            rp.logStream.end();
-                            rp.logStream = undefined;
                         }
 
                         if (rp.backgrounded) {
@@ -1057,15 +1047,17 @@ export default function (pi: ExtensionAPI) {
             ctx
         ): Promise<AgentToolResult<undefined>> {
             const jobId = generateJobId(++jobCounter);
-            const path = logPathForJob(jobId);
+            const logPath = logPathForJob(jobId);
             const shouldNotify = params.notify !== false;
 
+            const logFd = openSync(logPath, "w");
             const proc = spawn("bash", ["-c", params.command], {
-                stdio: ["pipe", "pipe", "pipe"],
+                stdio: ["pipe", logFd, logFd],
                 cwd: ctx.cwd,
                 detached: true,
                 env: { ...process.env },
             });
+            closeSync(logFd);
 
             if (!proc.pid) {
                 throw new Error("Failed to spawn background process");
@@ -1077,24 +1069,18 @@ export default function (pi: ExtensionAPI) {
                 pid: proc.pid,
                 startTime: Date.now(),
                 status: "running",
-                logPath: path,
+                logPath: logPath,
                 proc,
                 toolCallId,
             };
             createJobDonePromise(job);
             backgroundJobs.set(jobId, job);
 
-            // Write output to log file
-            const logStream = createWriteStream(path, { flags: "w" });
-            proc.stdout?.pipe(logStream, { end: false });
-            proc.stderr?.pipe(logStream, { end: false });
-
-            // Stall watchdog
             // Stall watchdog (with kill-on-oversize)
             const cancelStall = startStallWatchdog(
                 jobId,
                 params.command,
-                path,
+                logPath,
                 pi,
                 () => {
                     if (proc.pid) killProcessGroup(proc.pid, "SIGTERM");
@@ -1104,7 +1090,6 @@ export default function (pi: ExtensionAPI) {
 
             proc.on("close", (code) => {
                 cancelStall();
-                logStream.end();
                 markJobTerminal(
                     job,
                     code === 0 || code === null ? "completed" : "failed",
@@ -1119,7 +1104,6 @@ export default function (pi: ExtensionAPI) {
 
             proc.on("error", () => {
                 cancelStall();
-                logStream.end();
                 markJobTerminal(job, "failed");
                 if (pendingDecisionJobId === job.id)
                     pendingDecisionJobId = undefined;
@@ -1135,7 +1119,7 @@ export default function (pi: ExtensionAPI) {
                 content: [
                     {
                         type: "text" as const,
-                        text: `Started background job ${jobId}\nCommand: ${params.command}\nPID: ${proc.pid}\nOutput: ${path}`,
+                        text: `Started background job ${jobId}\nCommand: ${params.command}\nPID: ${proc.pid}\nOutput: ${logPath}`,
                     },
                 ],
                 details: undefined,
@@ -2462,9 +2446,16 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 };
                 if (data.jobs) {
                     for (const [id, jobData] of data.jobs) {
-                        if (jobData.status !== "running") {
-                            backgroundJobs.set(id, jobData);
+                        if (jobData.status === "running") {
+                            // Check if PID is still alive
+                            try {
+                                process.kill(jobData.pid, 0);
+                            } catch {
+                                // Process died while pi was away
+                                jobData.status = "completed";
+                            }
                         }
+                        backgroundJobs.set(id, jobData);
                     }
                 }
                 if (typeof data.jobCounter === "number") {
@@ -2705,12 +2696,14 @@ After completing a step, include a [DONE:n] tag in your response.`,
     pi.on("session_shutdown", async (_event, ctx) => {
         stopTitlebarSpinner(ctx);
 
-        // Kill all running background jobs
-        for (const job of backgroundJobs.values()) {
-            if (job.proc && job.status === "running") {
-                killProcessGroup(job.proc.pid!, "SIGTERM");
-            }
+        // Stop polling on any foreground processes.
+        for (const rp of runningProcesses.values()) {
+            if (rp.pollTimer) clearInterval(rp.pollTimer);
         }
+
+        // Don't kill running background jobs — file-backed stdio means
+        // they survive parent exit. Persist state so they can be
+        // re-attached after restart.
 
         // Persist state
         pi.appendEntry("background-tasks-state", {
