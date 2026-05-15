@@ -29,7 +29,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .tool-versions
-          cache: pnpm
 
       - run: pnpm install --no-frozen-lockfile
 
@@ -48,7 +47,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .tool-versions
-          cache: pnpm
 
       - run: pnpm install --no-frozen-lockfile
 
@@ -66,7 +64,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .tool-versions
-          cache: pnpm
 
       - run: pnpm install --no-frozen-lockfile
 
@@ -88,7 +85,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .tool-versions
-          cache: pnpm
           # Do NOT set registry-url — it creates an .npmrc that overrides OIDC
 
       - run: pnpm install --no-frozen-lockfile
