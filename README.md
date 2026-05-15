@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Mearman/tau/ci.yml?branch=main)](https://github.com/Mearman/tau/actions)
 
-Background tasks, notifications, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
+Background tasks, notifications, plan mode, presets, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
 
 ## Features
 
@@ -23,74 +23,69 @@ Background tasks, notifications, and other enhancements for the pi agent loop. M
 - **Task management UI** — Shift+↓ or Ctrl+J opens grouped task list with detail views
 - **Ctrl+X** — kill most recent running background task
 - **Session persistence** — job history survives pi restarts
-- **Zero runtime dependencies** — tree-kill replaced with `process.kill(-pid)`
 
 ### Notifications
 
 - **Native terminal notifications** on agent completion — OSC 777 (Ghostty, iTerm2, WezTerm), OSC 99 (Kitty), Windows toast
 - **Last agent message** shown in the notification body (first line, max 200 chars)
-- **Replaces the standalone `notify.ts` extension**
+- **Do Not Disturb** — respects macOS Focus mode; suppresses notifications when DnD is active
+- **Persistent mode** — option to keep notifications visible until dismissed
+- `/notifications` command to configure
 
-## Usage
+### Plan Mode
 
-### Background a Running Command (Ctrl+B)
+- **Ctrl+Alt+P** or `/plan` — toggle read-only plan mode (only `read`, `bash`, `grep`, `find`, `ls` allowed)
+- **Automatic step extraction** — numbered plan steps are parsed from the agent's response
+- **Execution tracking** — switch to execution mode to track progress against the plan with `[DONE:n]` tags
+- **Status widget** — shows `📋 3/7` progress in the status bar
 
-```
-Agent: Running npm build...
-bash: npm run build
-> Building [1/10]...
+### Presets
 
-[User presses Ctrl+B]
-⏸ Backgrounded. Ctrl+B to resume.
-```
+- **Ctrl+Shift+U** — cycle through named presets
+- `/preset [name]` — switch directly or open selector UI
+- Configure model, thinking level, tools, and system prompt instructions per preset
+- Config files: `~/.pi/agent/presets.json` (global) and `.pi/presets.json` (project-local)
+- CLI flag: `pi --preset plan`
 
-Both the bash process **and** the agent loop are backgrounded simultaneously. The agent stops processing, and the user regains control.
+### Bookmarks
 
-### Resume (Ctrl+B again)
+- `/bookmark [label]` — label the last assistant message for easy navigation in `/tree`
+- `/unbookmark` — remove the most recent bookmark
 
-```
-[User presses Ctrl+B]
-▶ Resumed
-Agent: Continuing where you left off.
-```
+### Session Naming
 
-### Start Command in Background Immediately
+- `/session-name [name]` — set a friendly name that appears in the session selector
 
-```
-User: Start a build in the background
-Agent: I'll run that in the background immediately.
-bash_bg: cargo build --release
-→ Started background job job-1 (PID 42319)
-→ Output: /tmp/pi-bg-job-1.log
-```
+### Claude Rules
 
-### Auto-Background After 15 Seconds
+- Automatically scans `.claude/rules/*.md` (recursively) and injects the list into the system prompt
+- The agent can `read` specific rule files when relevant
 
-Commands running longer than 15 seconds are automatically backgrounded. The agent receives a followUp message asking whether to kill or continue:
+### Custom Footer
 
-```
-⏰ Command timed out after 15s and has been backgrounded as job-3.
-Choose one:
-- Use the jobs tool with action "kill" and jobId "job-3" to terminate it.
-- Use the jobs tool with action "output" and jobId "job-3" to check progress.
-- Do nothing and it will continue running in the background.
-```
+- `/footer` — toggle a custom footer showing token usage (↑input ↓output $cost) and git branch
 
-### Task Management (Shift+↓ or Ctrl+J)
+### Git Checkpoints
 
-```
-Background Tasks
-  ◐ agent · backgrounded · Ctrl+B to resume
-  ◐ job-3: npm build · 45s
-  ✅ job-1: sleep 10 · completed
-  ❌ job-2: pi --model · failed
-```
+- Creates a `git stash create` checkpoint at each turn
+- On `/fork`, offers to restore code to that point in history
 
-Select a task to see detail view with actions: attach, show output, kill.
+### GitHub Issue Autocomplete
 
-### Kill Most Recent Task (Ctrl+X)
+- Preloads the latest 100 open issues from the current GitHub repo via `gh`
+- Type `#` in the input to trigger fuzzy-filtered issue completion
+- Works with SSH and HTTPS remote URLs
 
-Instantly terminates the most recently started running background task.
+### Handoff
+
+- `/handoff <goal>` — generates a focused context-transfer prompt using the current model
+- Opens an editor to review/edit the prompt before creating a new session
+- Preserves parent session linkage
+
+### Conversation Summary
+
+- `/summarize` — generates a structured summary of the current conversation using an LLM
+- Renders as Markdown in a custom UI
 
 ## Tools
 
@@ -99,6 +94,8 @@ Instantly terminates the most recently started running background task.
 | `bash` | Standard bash, enhanced with 15s auto-background timeout and Ctrl+B support |
 | `bash_bg` | Start a command in the background immediately |
 | `jobs` | `list`, `output`, `kill`, or `attach` to background jobs |
+| `job_decide` | Decide what to do with a timed-out background job |
+| `todo` | Manage a todo list — `list`, `add`, `toggle`, `clear` |
 
 ## Commands
 
@@ -107,6 +104,17 @@ Instantly terminates the most recently started running background task.
 | `/bg` | Same as Ctrl+B — background bash/agent or resume |
 | `/fg` | Attach to a background job, optionally with `--snapshot` |
 | `/jobs` | Open task management interface |
+| `/todos` | Show all todos on the current branch |
+| `/tools` | Enable/disable tools |
+| `/plan` | Toggle plan mode (read-only exploration) |
+| `/notifications` | Configure notification settings |
+| `/bookmark` | Bookmark last assistant message |
+| `/unbookmark` | Remove last bookmark |
+| `/session-name` | Set or show session name |
+| `/footer` | Toggle custom footer |
+| `/preset [name]` | Switch preset configuration |
+| `/handoff <goal>` | Transfer context to a new focused session |
+| `/summarize` | Summarise the current conversation |
 
 ## Shortcuts
 
@@ -115,30 +123,42 @@ Instantly terminates the most recently started running background task.
 | `Ctrl+B` | Background running bash + agent, or resume backgrounded agent |
 | `Ctrl+X` | Kill most recent running background task |
 | `Ctrl+J` / `Shift+↓` | Open task management interface |
+| `Ctrl+Alt+P` | Toggle plan mode |
+| `Ctrl+Shift+U` | Cycle presets |
+
+## CLI Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--plan` | Start in plan mode (read-only exploration) |
+| `--preset <name>` | Start with a named preset |
 
 ## Architecture
 
 ```
-User presses Ctrl+B
-       │
-       ├─ Bash process running?
-       │   YES → backgroundProcess()
-       │         - Remove foreground data listeners
-       │         - Pipe stdout/stderr to /tmp/pi-bg-<jobId>.log
-       │         - Unref child process
-       │         - Resolve bash tool promise with backgrounded status
-       │
-       └─ Set agentBackgrounded = true
-           - tool_call handler returns block:true
-           - Agent's current turn finishes
-           - Loop stops (no more tool calls execute)
-           - User gets fresh input line
-
-User presses Ctrl+B again
-       │
-       └─ agentBackgrounded = false
-           - pi.sendMessage({ content: "Continuing..." }, { triggerTurn: true })
-           - Agent starts new loop with full conversation context
+src/
+  index.ts              Entry point — creates TauState, registers all features, cross-cutting event handlers
+  state.ts              TauState class — shared mutable state
+  types.ts              Shared type definitions (BackgroundJob, RunningProcess, Todo, etc.)
+  utils.ts              Shared utilities (formatDuration, notify, killProcessGroup, etc.)
+  plan-utils.ts         Plan-mode pure functions (step extraction, safe command checking)
+  features/
+    background.ts       bash override, bash_bg, jobs, job_decide tools
+    background-commands.ts  /bg, /fg, /jobs commands, Ctrl+B/X/J shortcuts, task UI
+    titlebar.ts         Braille spinner and elapsed timer
+    plan-mode.ts        /plan, Ctrl+Alt+P, plan execution tracking
+    todo.ts             todo tool, /todos command
+    tools-selector.ts   /tools command, state persistence
+    notifications.ts    /notifications, agent_end notification, DnD support
+    bookmark.ts         /bookmark, /unbookmark
+    claude-rules.ts     .claude/rules/ scanning
+    custom-footer.ts    /footer command
+    git-checkpoint.ts   git stash checkpointing
+    github-autocomplete.ts  # issue autocomplete
+    handoff.ts          /handoff command
+    preset.ts           /preset, Ctrl+Shift+U, JSON config
+    session-name.ts     /session-name command
+    summarize.ts        /summarize command
 ```
 
 ### Key Design Decisions
@@ -147,6 +167,8 @@ User presses Ctrl+B again
 - **Process groups over tree-kill**: `process.kill(-pid)` kills the entire group when spawned with `detached: true`. No external dependency needed.
 - **Block over pause**: The agent loop can't be truly backgrounded (it runs in-process). Tool call blocking is the closest approximation. The agent sees an empty block reason and stops cleanly.
 - **15s timeout**: Matches Claude Code's `ASSISTANT_BLOCKING_BUDGET_MS`. Commands that need longer should use `bash_bg`.
+- **Feature modules**: Each feature is a self-contained module that registers its own tools, commands, shortcuts, and event handlers. Shared state lives in a single `TauState` instance.
+- **Subagent stays separate**: The subagent extension is large (~1000 lines) with external agent definitions and prompt templates. It remains a standalone extension for maintainability.
 
 ## Known Limitations
 
