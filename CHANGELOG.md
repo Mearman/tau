@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/Mearman/tau/compare/v1.1.0...v1.2.0) (2026-05-15)
+
+### Features
+
+* **notify:** respect macOS system DnD/Focus mode ([75f160c](https://github.com/Mearman/tau/commit/75f160c194e4f245373d3df9a3b6a58a3bde3a3f))
+
 ## [1.1.0](https://github.com/Mearman/tau/compare/v1.0.2...v1.1.0) (2026-05-15)
 
 ### Features
