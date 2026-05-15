@@ -178,6 +178,8 @@ interface BackgroundJob {
     toolCallId: string;
     donePromise?: Promise<void>;
     resolveDone?: () => void;
+    /** True once the agent has consumed output via attach — suppresses completion notification. */
+    outputConsumed?: boolean;
 }
 
 interface RunningProcess {
@@ -578,8 +580,10 @@ export default function (pi: ExtensionAPI) {
         );
     }
 
-    /** Send a structured completion notification to the agent. */
+    /** Send a structured completion notification to the agent.
+     *  Skipped when output was already consumed via attach. */
     function notifyCompletion(job: BackgroundJob, ctx: UiContext): void {
+        if (job.outputConsumed) return;
         const duration = formatDuration(Date.now() - job.startTime);
         const emoji = job.status === "completed" ? "✅" : "❌";
         const statusText = `Background ${job.id} ${job.status} (${duration})`;
@@ -1281,6 +1285,7 @@ export default function (pi: ExtensionAPI) {
                         job.logPath,
                         MAX_OUTPUT_PREVIEW_CHARS
                     );
+                    job.outputConsumed = true;
                     return {
                         content: [
                             {
