@@ -390,7 +390,6 @@ export default function (pi: ExtensionAPI) {
 
     // ── Notification config ──────────────────────────────────────────────
 
-    let notificationEnabled = true;
     let notificationPersistent = false;
 
     /** Check macOS system Do Not Disturb / Focus mode using notifyutil.
@@ -2323,14 +2322,6 @@ After completing a step, include a [DONE:n] tag in your response.`,
             await ctx.ui.custom((_tui, theme, _kb, done) => {
                 const items: SettingItem[] = [
                     {
-                        id: "notifications-enabled",
-                        label: "Tau notifications (master switch)",
-                        currentValue: notificationEnabled
-                            ? "enabled"
-                            : "disabled",
-                        values: ["enabled", "disabled"],
-                    },
-                    {
                         id: "notifications-persistent",
                         label: "Persistent (stay until dismissed)",
                         currentValue: notificationPersistent
@@ -2370,14 +2361,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
                     items,
                     Math.min(items.length + 2, 15),
                     getSettingsListTheme(),
-                    (id, newValue) => {
-                        if (id === "notifications-enabled") {
-                            notificationEnabled = newValue === "enabled";
-                        } else if (id === "notifications-persistent") {
-                            notificationPersistent = newValue === "persistent";
-                        }
+                    (_id, newValue) => {
+                        notificationPersistent = newValue === "persistent";
                         pi.appendEntry("notifications-config", {
-                            enabled: notificationEnabled,
                             persistent: notificationPersistent,
                         });
                     },
@@ -2542,7 +2528,6 @@ After completing a step, include a [DONE:n] tag in your response.`,
                     | { enabled?: boolean; persistent?: boolean }
                     | undefined;
                 if (data) {
-                    notificationEnabled = data.enabled ?? true;
                     notificationPersistent = data.persistent ?? false;
                 }
                 break;
@@ -2676,15 +2661,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
         }
 
         // ── Notification ────────────────────────────────────────────────
-        if (notificationEnabled) {
-            const inDnd = await isSystemDndActive();
-            if (!inDnd) {
-                const body = lastAssistantText(event.messages);
-                const notificationBody = body
-                    ? truncateNotificationBody(body)
-                    : "Ready for input";
-                notify("Pi", notificationBody, notificationPersistent);
-            }
+        const inDnd = await isSystemDndActive();
+        if (!inDnd) {
+            const body = lastAssistantText(event.messages);
+            const notificationBody = body
+                ? truncateNotificationBody(body)
+                : "Ready for input";
+            notify("Pi", notificationBody, notificationPersistent);
         }
     });
 
