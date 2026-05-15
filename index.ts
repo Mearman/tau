@@ -400,7 +400,7 @@ export default function (pi: ExtensionAPI) {
 		if (rp.stderrListener) rp.proc.stderr?.removeListener("data", rp.stderrListener);
 
 		// Pipe remaining output to the log file.
-		rp.logStream = createWriteStream(path, { flags: "a" });
+		rp.logStream = createWriteStream(path, { flags: "w" });
 		rp.proc.stdout?.pipe(rp.logStream, { end: false });
 		rp.proc.stderr?.pipe(rp.logStream, { end: false });
 
@@ -660,7 +660,7 @@ export default function (pi: ExtensionAPI) {
 			backgroundJobs.set(jobId, job);
 
 			// Write output to log file
-			const logStream = createWriteStream(path, { flags: "a" });
+			const logStream = createWriteStream(path, { flags: "w" });
 			proc.stdout?.pipe(logStream, { end: false });
 			proc.stderr?.pipe(logStream, { end: false });
 
