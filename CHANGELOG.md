@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/Mearman/tau/compare/v1.0.0...v1.0.1) (2026-05-15)
+
+### Bug Fixes
+
+* **ui:** allow bash through pending-decision gate ([a7d3f49](https://github.com/Mearman/tau/commit/a7d3f49753865832f408e6e8b95b5679e35da0fd))
+
 ## 1.0.0 (2026-05-15)
 
 ### ⚠ BREAKING CHANGES
