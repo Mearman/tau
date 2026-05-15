@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "plan-utils.ts"]
+  "include": ["src/index.ts", "src/plan-utils.ts"]
 }
