@@ -1,3 +1,9 @@
+## [1.4.0](https://github.com/Mearman/tau/compare/v1.3.1...v1.4.0) (2026-05-15)
+
+### Features
+
+* **bg:** file-backed stdio for survivable background tasks ([552375f](https://github.com/Mearman/tau/commit/552375f9f7c37bfe7c6cebf974f671176d723146))
+
 ## [1.3.1](https://github.com/Mearman/tau/compare/v1.3.0...v1.3.1) (2026-05-15)
 
 ### Bug Fixes
