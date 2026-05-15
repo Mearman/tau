@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/Mearman/tau/compare/v1.4.0...v1.4.1) (2026-05-15)
+
+### Bug Fixes
+
+* **bg:** namespace log files by pi PID to avoid collisions ([8c6b310](https://github.com/Mearman/tau/commit/8c6b310d3fc486b12f95e9e5110bd6b3ff2340bd))
+
 ## [1.4.0](https://github.com/Mearman/tau/compare/v1.3.1...v1.4.0) (2026-05-15)
 
 ### Features
