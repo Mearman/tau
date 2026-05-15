@@ -43,7 +43,15 @@ import {
 } from "@earendil-works/pi-tui";
 import { Key } from "@earendil-works/pi-tui";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { statSync, openSync, readSync, closeSync } from "node:fs";
+import {
+    createWriteStream,
+    readdirSync,
+    statSync,
+    openSync,
+    readSync,
+    closeSync,
+    unlinkSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -177,12 +185,13 @@ interface RunningProcess {
     proc: ChildProcess;
     command: string;
     backgrounded: boolean;
-    /** File descriptor for stdout/stderr log file (kernel writes directly). */
-    logFd?: number;
-    /** Polling interval for reading foreground output from the log file. */
-    pollTimer?: ReturnType<typeof setInterval>;
-    /** Bytes read so far — next poll starts from this offset. */
-    lastReadOffset: number;
+    /** Accumulated foreground output (before backgrounding). */
+    output: string;
+    /** Listener references so they can be removed on background. */
+    stdoutListener?: (data: Buffer) => void;
+    stderrListener?: (data: Buffer) => void;
+    /** Log file stream, created when the process is backgrounded. */
+    logStream?: ReturnType<typeof createWriteStream>;
     resolve?: (result: AgentToolResult<BashToolDetails | undefined>) => void;
     reject?: (error: Error) => void;
 }
@@ -267,6 +276,32 @@ function markJobTerminal(
     if (job.resolveDone) {
         job.resolveDone();
         delete job.resolveDone;
+    }
+}
+
+// ─── Log file cleanup ────────────────────────────────────────────────
+
+/** Remove stale /tmp/pi-bg-* log files not referenced by any active job.
+ *  Files older than 24 hours are always removed. */
+function cleanupStaleLogs(): void {
+    const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+    try {
+        const entries = readdirSync("/tmp");
+        const now = Date.now();
+        for (const entry of entries) {
+            if (!entry.startsWith("pi-bg-")) continue;
+            const filePath = `/tmp/${entry}`;
+            try {
+                const { mtimeMs } = statSync(filePath);
+                if (now - mtimeMs > MAX_AGE_MS) {
+                    unlinkSync(filePath);
+                }
+            } catch {
+                /* file already gone */
+            }
+        }
+    } catch {
+        /* /tmp not accessible */
     }
 }
 
@@ -602,11 +637,17 @@ export default function (pi: ExtensionAPI) {
         backgroundJobs.set(jobId, job);
         currentlyRunningToolCallId = null;
 
-        // Stop polling — output is already going to the log file.
-        if (rp.pollTimer) {
-            clearInterval(rp.pollTimer);
-            rp.pollTimer = undefined;
-        }
+        // Remove foreground data listeners so output goes to file only.
+        if (rp.stdoutListener)
+            rp.proc.stdout?.removeListener("data", rp.stdoutListener);
+        if (rp.stderrListener)
+            rp.proc.stderr?.removeListener("data", rp.stderrListener);
+
+        // Create log file and write accumulated output, then pipe remaining.
+        rp.logStream = createWriteStream(logPath, { flags: "w" });
+        rp.logStream.write(rp.output);
+        rp.proc.stdout?.pipe(rp.logStream, { end: false });
+        rp.proc.stderr?.pipe(rp.logStream, { end: false });
 
         // Start stall watchdog (with kill-on-oversize)
         const cancelStall = startStallWatchdog(
@@ -620,9 +661,13 @@ export default function (pi: ExtensionAPI) {
             }
         );
 
-        // Clean up watchdog when the process exits.
+        // Close the log file when the process exits.
         rp.proc.on("close", () => {
             cancelStall();
+            if (rp.logStream) {
+                rp.logStream.end();
+                rp.logStream = undefined;
+            }
         });
 
         // Resolve the original tool call immediately with backgrounded status
@@ -848,38 +893,24 @@ export default function (pi: ExtensionAPI) {
 
             return new Promise<AgentToolResult<BashToolDetails | undefined>>(
                 (resolve, reject) => {
-                    // Pre-allocate a log file and spawn with file-backed stdio.
-                    // The kernel writes stdout/stderr directly to the fd — no
-                    // Node pipes, so the child survives parent exit.
-                    const jobId = generateJobId(jobCounter + 1);
-                    const logPath = logPathForJob(jobId);
-                    const logFd = openSync(logPath, "w");
-
                     const proc = spawn("bash", ["-c", command], {
-                        stdio: ["pipe", logFd, logFd],
+                        stdio: ["pipe", "pipe", "pipe"],
                         cwd: ctx.cwd,
                         detached: true,
                         env: { ...process.env },
                     });
-
-                    // Parent's copy of the fd is no longer needed — the child
-                    // has its own from fork(2).
-                    closeSync(logFd);
 
                     if (!proc.pid) {
                         reject(new Error("Failed to spawn process"));
                         return;
                     }
 
-                    // Claim the jobId now that we know spawn succeeded
-                    jobCounter++;
-
                     const rp: RunningProcess = {
                         toolCallId,
                         proc,
                         command,
                         backgrounded: false,
-                        lastReadOffset: 0,
+                        output: "",
                         resolve,
                         reject,
                     };
@@ -887,49 +918,35 @@ export default function (pi: ExtensionAPI) {
                     runningProcesses.set(toolCallId, rp);
                     currentlyRunningToolCallId = toolCallId;
 
-                    // Poll the log file for foreground output. The child writes
-                    // directly to the file, so we tail it to feed onUpdate.
-                    let lastOutput = "";
-                    const pollTimer = setInterval(() => {
-                        if (rp.backgrounded) return;
-                        try {
-                            const { size } = statSync(logPath);
-                            if (size <= rp.lastReadOffset) return;
-                            const fd = openSync(logPath, "r");
-                            try {
-                                const toRead = size - rp.lastReadOffset;
-                                const buf = Buffer.alloc(toRead);
-                                readSync(fd, buf, 0, toRead, rp.lastReadOffset);
-                                lastOutput += buf.toString("utf-8");
-                                rp.lastReadOffset = size;
-                            } finally {
-                                closeSync(fd);
-                            }
-                            onUpdate?.({
-                                content: [
-                                    { type: "text" as const, text: lastOutput },
-                                ],
-                                details: undefined,
-                            });
-                        } catch {
-                            /* file not ready yet */
-                        }
-                    }, 200);
-                    pollTimer.unref();
-                    rp.pollTimer = pollTimer;
+                    // Stream handler — accumulates output for foreground streaming.
+                    // Listeners are removed by backgroundProcess() when the process is backgrounded.
+                    function handleData(data: Buffer): void {
+                        const chunk = data.toString();
+                        rp.output += chunk;
+                        onUpdate?.({
+                            content: [
+                                { type: "text" as const, text: rp.output },
+                            ],
+                            details: undefined,
+                        });
+                    }
+
+                    const stdoutListener = (data: Buffer) => handleData(data);
+                    const stderrListener = (data: Buffer) => handleData(data);
+                    rp.stdoutListener = stdoutListener;
+                    rp.stderrListener = stderrListener;
+                    proc.stdout?.on("data", stdoutListener);
+                    proc.stderr?.on("data", stderrListener);
 
                     proc.on("close", (code) => {
-                        clearInterval(pollTimer);
                         runningProcesses.delete(toolCallId);
                         if (currentlyRunningToolCallId === toolCallId) {
                             currentlyRunningToolCallId = null;
                         }
-
-                        // Final read to capture any output between last poll and exit
-                        const finalOutput = readOutputTailSync(
-                            logPath,
-                            MAX_OUTPUT_PREVIEW_CHARS
-                        );
+                        if (rp.logStream) {
+                            rp.logStream.end();
+                            rp.logStream = undefined;
+                        }
 
                         if (rp.backgrounded) {
                             const job = Array.from(
@@ -953,7 +970,7 @@ export default function (pi: ExtensionAPI) {
                                 content: [
                                     {
                                         type: "text" as const,
-                                        text: finalOutput || "(no output)",
+                                        text: rp.output || "(no output)",
                                     },
                                 ],
                                 details: undefined,
@@ -962,10 +979,13 @@ export default function (pi: ExtensionAPI) {
                     });
 
                     proc.on("error", (err) => {
-                        clearInterval(pollTimer);
                         runningProcesses.delete(toolCallId);
                         if (currentlyRunningToolCallId === toolCallId) {
                             currentlyRunningToolCallId = null;
+                        }
+                        if (rp.logStream) {
+                            rp.logStream.end();
+                            rp.logStream = undefined;
                         }
 
                         if (rp.backgrounded) {
@@ -998,7 +1018,7 @@ export default function (pi: ExtensionAPI) {
                         });
                     }
 
-                    // Default timeout \u2014 backgrounds and asks the agent what to do
+                    // Default timeout — backgrounds and asks the agent what to do
                     startTimeoutTimer(rp, ctx);
 
                     // Background hint after 2s of bash execution (matches Claude Code)
@@ -2555,6 +2575,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 break;
             }
         }
+
+        // Clean up stale log files from previous sessions
+        cleanupStaleLogs();
     });
 
     // ── Notifications ────────────────────────────────────────────────────
@@ -2696,14 +2719,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
     pi.on("session_shutdown", async (_event, ctx) => {
         stopTitlebarSpinner(ctx);
 
-        // Stop polling on any foreground processes.
-        for (const rp of runningProcesses.values()) {
-            if (rp.pollTimer) clearInterval(rp.pollTimer);
-        }
-
-        // Don't kill running background jobs — file-backed stdio means
-        // they survive parent exit. Persist state so they can be
-        // re-attached after restart.
+        // Persist state. Pipe-backed backgrounded jobs will get EPIPE when
+        // the parent exits; file-backed bash_bg jobs survive. Either way we
+        // record them so they can be checked on restart.
 
         // Persist state
         pi.appendEntry("background-tasks-state", {
