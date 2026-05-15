@@ -1,827 +1,1020 @@
 /**
- * Background Tasks Extension with Ctrl+B Support
- * 
- * Enhances bash tool to support backgrounding with Ctrl+Shift+B:
- * - Run bash commands normally with streaming output
- * - Press Ctrl+Shift+B during execution to send to background
- * - Process continues running while you regain control
- * - Get notifications when background jobs complete
- * - Manage background jobs with /jobs command and tools
+ * Tau (τ) — Background Tasks Extension for pi
+ *
+ * Enhances the built-in bash tool with background execution support:
+ * - Ctrl+Shift+B to background the currently running bash process
+ * - 2-minute default timeout: backgrounds and asks the agent whether to kill or continue
+ * - Output written to disk files (/tmp/pi-bg-<jobId>.log), not memory buffers
+ * - Process-group kill via tree-kill
+ * - Stall detection: if output hasn't grown for 45s and the tail looks like an
+ *   interactive prompt ((y/n), Press any key, Continue?), notify the agent
+ * - Size watchdog: kills jobs exceeding 100 MiB output
+ * - Working status bar widget showing running jobs
+ * - Structured completion notifications via pi.sendMessage
+ *
+ * Tools: bash (overridden), bash_bg, jobs
+ * Commands: /bg, /fg, /jobs
+ * Shortcuts: Ctrl+Shift+B, Ctrl+J
  */
 
-import { spawn, ChildProcess } from "node:child_process";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { createBashTool } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createBashTool, type BashToolDetails } from "@earendil-works/pi-coding-agent";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createWriteStream, statSync, existsSync, openSync, readSync, closeSync, type WriteStream } from "node:fs";
+import { readFile } from "node:fs/promises";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+
+// ─── tree-kill (lazy-loaded) ────────────────────────────────────────────
+
+// ─── Process tree kill ─────────────────────────────────────────────
+
+/** Kill an entire process group. Requires the child to have been spawned
+ *  with `detached: true` so it became a process group leader. */
+function killProcessGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+	try {
+		process.kill(-pid, signal);
+	} catch {
+		// Process group kill failed — try just the parent.
+		try { process.kill(pid, signal); } catch { /* already dead */ }
+	}
+}
+
+// ─── Configuration ──────────────────────────────────────────────────────
+
+/** Default timeout for bash commands. After this, the process is backgrounded and
+ *  the agent is asked whether to let it continue or kill it. */
+const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
+const STALL_CHECK_INTERVAL_MS = 5_000;
+const STALL_THRESHOLD_MS = 45_000;
+const STALL_TAIL_BYTES = 1024;
+const MAX_OUTPUT_PREVIEW_CHARS = 12_000;
+/** Maximum log file size before the stall watchdog kills the job. */
+const MAX_LOG_BYTES = 100 * 1024 * 1024; // 100 MiB
+
+/** Interactive-prompt patterns at the end of output that suggest a command is
+ *  blocked waiting for keyboard input (CC-1175 / Claude Code). */
+const PROMPT_PATTERNS = [
+	/\(y\/n\)/i,
+	/\[y\/n\]/i,
+	/\(yes\/no\)/i,
+	/\b(?:Do you|Would you|Shall I|Are you sure|Ready to)\b.*\? *$/i,
+	/Press (any key|Enter)/i,
+	/Continue\?/i,
+	/Overwrite\?/i,
+];
+
+function looksLikePrompt(tail: string): boolean {
+	const lastLine = tail.trimEnd().split("\n").pop() ?? "";
+	return PROMPT_PATTERNS.some(p => p.test(lastLine));
+}
+
+// ─── Context types ───────────────────────────────────────────────────
+
+/** Minimal context interface for functions that only need UI operations. */
+interface UiContext {
+	ui: {
+		notify(message: string, level?: "info" | "success" | "warning" | "error"): void;
+		setWidget(name: string, content: string[] | undefined): void;
+		setStatus(name: string, content: unknown): void;
+		theme: { fg(colour: string, text: string): string };
+		select(title: string, options: string[]): Promise<number | undefined>;
+		editor(title: string, content: string): Promise<void>;
+	};
+}
+
+// ─── Job types ──────────────────────────────────────────────────────────
+
+type JobStatus = "running" | "completed" | "failed" | "killed";
 
 interface BackgroundJob {
-  id: string;
-  command: string;
-  pid: number;
-  startTime: number;
-  status: 'running' | 'completed' | 'failed';
-  exitCode?: number;
-  output: string;
-  proc?: ChildProcess;
-  toolCallId: string;
-  donePromise?: Promise<void>;
-  resolveDone?: () => void;
+	id: string;
+	command: string;
+	pid: number;
+	startTime: number;
+	status: JobStatus;
+	exitCode?: number;
+	logPath: string;
+	proc?: ChildProcess;
+	toolCallId: string;
+	donePromise?: Promise<void>;
+	resolveDone?: () => void;
 }
 
 interface RunningProcess {
-  toolCallId: string;
-  proc: ChildProcess;
-  command: string;
-  backgrounded: boolean;
-  onUpdate?: (result: any) => void;
-  resolve?: (result: any) => void;
-  reject?: (error: Error) => void;
+	toolCallId: string;
+	proc: ChildProcess;
+	command: string;
+	backgrounded: boolean;
+	/** Listener references so they can be removed on background. */
+	stdoutListener?: (data: Buffer) => void;
+	stderrListener?: (data: Buffer) => void;
+	/** Log file stream, created when the process is backgrounded. */
+	logStream?: WriteStream;
+	resolve?: (result: AgentToolResult<BashToolDetails | undefined>) => void;
+	reject?: (error: Error) => void;
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+function generateJobId(counter: number): string {
+	return `job-${counter}`;
+}
+
+function logPathForJob(jobId: string): string {
+	return `/tmp/pi-bg-${jobId}.log`;
+}
+
+function formatDuration(ms: number): string {
+	const totalSecs = Math.floor(ms / 1000);
+	const mins = Math.floor(totalSecs / 60);
+	const secs = totalSecs % 60;
+	return mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
+}
+
+async function readOutputTail(path: string, maxChars: number): Promise<string> {
+	try {
+		const content = await readFile(path, "utf-8");
+		if (content.length <= maxChars) return content;
+		return `...[truncated, showing last ${maxChars} chars]\n${content.slice(-maxChars)}`;
+	} catch {
+		return "(no output yet)";
+	}
+}
+
+function readOutputTailSync(path: string, maxChars: number): string {
+	try {
+		const { size } = statSync(path);
+		if (size === 0) return "(no output yet)";
+		const fd = openSync(path, "r");
+		try {
+			const readStart = Math.max(0, size - maxChars);
+			const toRead = Math.min(size, maxChars);
+			const buf = Buffer.alloc(toRead);
+			readSync(fd, buf, 0, toRead, readStart);
+			const content = buf.toString("utf-8", 0, toRead);
+			if (size <= maxChars) return content;
+			return `...[truncated, showing last ${maxChars} chars]\n${content}`;
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return "(no output yet)";
+	}
+}
+
+function formatJobLine(job: BackgroundJob): string {
+	const duration = formatDuration(Date.now() - job.startTime);
+	const status =
+		job.status === "running" ? `⏳ running (${duration})` :
+		job.status === "completed" ? "✅ completed" :
+		job.status === "failed" ? "❌ failed" :
+		"🛑 killed";
+	return `${job.id}: ${job.command.slice(0, 80)} - ${status}`;
+}
+
+function createJobDonePromise(job: BackgroundJob): void {
+	let resolveDone: (() => void) | undefined;
+	job.donePromise = new Promise<void>((resolve) => { resolveDone = resolve; });
+	job.resolveDone = resolveDone;
+}
+
+function markJobTerminal(job: BackgroundJob, status: JobStatus, exitCode?: number): void {
+	job.status = status;
+	job.exitCode = exitCode;
+	delete job.proc;
+	if (job.resolveDone) {
+		job.resolveDone();
+		delete job.resolveDone;
+	}
+}
+
+// ─── Stall watchdog ─────────────────────────────────────────────────────
+
+function startStallWatchdog(
+	jobId: string,
+	command: string,
+	logPath: string,
+	pi: ExtensionAPI,
+	onOversize?: () => void,
+): () => void {
+	let lastSize = 0;
+	let lastGrowth = Date.now();
+	let cancelled = false;
+
+	const timer = setInterval(() => {
+		if (cancelled) return;
+		try {
+			const size = statSync(logPath).size;
+
+			// Size watchdog — kill jobs producing excessive output.
+			if (size > MAX_LOG_BYTES) {
+				cancelled = true;
+				clearInterval(timer);
+				if (onOversize) onOversize();
+				pi.sendMessage({
+					customType: "bg-stall",
+					content: `\u26a0\ufe0f Background job ${jobId} exceeded ${MAX_LOG_BYTES / (1024 * 1024)} MiB output. Terminated.`,
+					display: true,
+					details: { jobId, logPath, command },
+				}, {
+					deliverAs: "followUp",
+					triggerTurn: true,
+				});
+				return;
+			}
+
+			if (size > lastSize) {
+				lastSize = size;
+				lastGrowth = Date.now();
+				return;
+			}
+			if (Date.now() - lastGrowth < STALL_THRESHOLD_MS) return;
+
+			// Output has been stagnant for 45s — check the tail for prompt patterns
+			const tail = readOutputTailSync(logPath, STALL_TAIL_BYTES);
+			if (!looksLikePrompt(tail)) {
+				// Not a prompt — reset so next check is 45s out
+				lastGrowth = Date.now();
+				return;
+			}
+
+			// Looks like an interactive prompt — notify the agent
+			cancelled = true;
+			clearInterval(timer);
+
+			const summary =
+				`Background job ${jobId} appears to be waiting for interactive input.\n` +
+				`Command: ${command}\n\n` +
+				`Last output:\n${tail.trimEnd()}\n\n` +
+				`The command is likely blocked on an interactive prompt. Kill this job and re-run ` +
+				`with piped input (e.g., \`echo y | command\`) or a non-interactive flag.`;
+
+			pi.sendMessage({
+				customType: "bg-stall",
+				content: `⚠️ ${summary}`,
+				display: true,
+				details: { jobId, logPath, command },
+			}, {
+				deliverAs: "followUp",
+				triggerTurn: true,
+			});
+		} catch {
+			// File may not exist yet — skip this tick
+		}
+	}, STALL_CHECK_INTERVAL_MS);
+
+	timer.unref();
+	return () => {
+		cancelled = true;
+		clearInterval(timer);
+	};
+}
+
+// ─── Extension ──────────────────────────────────────────────────────────
+
 export default function (pi: ExtensionAPI) {
-  const backgroundJobs = new Map<string, BackgroundJob>();
-  const runningProcesses = new Map<string, RunningProcess>();
-  let jobCounter = 0;
-
-  // Track currently running bash processes
-  let currentlyRunningToolCallId: string | null = null;
-
-  // Override the bash tool to support backgrounding
-  const originalBashTool = createBashTool(process.cwd());
-
-  pi.registerTool({
-    ...originalBashTool,
-    name: "bash",
-    
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const command = params.command;
-      
-      return new Promise<any>((resolve, reject) => {
-        // Spawn the process
-        const proc = spawn('bash', ['-c', command], {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          cwd: ctx.cwd,
-          detached: true, // Allow process to continue independently
-          env: { ...process.env }, // Inherit environment
-        });
-
-        if (!proc.pid) {
-          reject(new Error("Failed to spawn process"));
-          return;
-        }
-
-        // Track this running process
-        const runningProcess: RunningProcess = {
-          toolCallId,
-          proc,
-          command,
-          backgrounded: false,
-          onUpdate,
-          resolve,
-          reject,
-        };
-
-        runningProcesses.set(toolCallId, runningProcess);
-        currentlyRunningToolCallId = toolCallId;
-
-        let output = '';
-        let hasOutput = false;
-
-        // Collect output
-        proc.stdout?.on('data', (data) => {
-          const chunk = data.toString();
-          output += chunk;
-          hasOutput = true;
-
-          // Keep live output buffer for attached/backgrounded jobs
-          if (runningProcess.backgrounded) {
-            const bgJob = Array.from(backgroundJobs.values()).find((j) => j.toolCallId === toolCallId);
-            if (bgJob) bgJob.output = output;
-          }
-
-          // Stream updates if not backgrounded
-          if (!runningProcess.backgrounded && onUpdate) {
-            onUpdate({
-              content: [{ type: "text", text: output }],
-              details: { partial: true },
-            });
-          }
-        });
-
-        proc.stderr?.on('data', (data) => {
-          const chunk = data.toString();
-          output += chunk;
-          hasOutput = true;
-
-          // Keep live output buffer for attached/backgrounded jobs
-          if (runningProcess.backgrounded) {
-            const bgJob = Array.from(backgroundJobs.values()).find((j) => j.toolCallId === toolCallId);
-            if (bgJob) bgJob.output = output;
-          }
-
-          // Stream updates if not backgrounded
-          if (!runningProcess.backgrounded && onUpdate) {
-            onUpdate({
-              content: [{ type: "text", text: output }],
-              details: { partial: true },
-            });
-          }
-        });
-
-        // Handle process completion
-        proc.on('close', (code) => {
-          runningProcesses.delete(toolCallId);
-          if (currentlyRunningToolCallId === toolCallId) {
-            currentlyRunningToolCallId = null;
-          }
-
-          const result = {
-            content: [{ type: "text", text: output || "(no output)" }],
-            details: {
-              exitCode: code || 0,
-              command,
-              backgrounded: runningProcess.backgrounded,
-            },
-          };
-
-          if (runningProcess.backgrounded) {
-            // Update background job status
-            const job = Array.from(backgroundJobs.values())
-              .find(j => j.toolCallId === toolCallId);
-            if (job) {
-              job.output = output;
-              markJobTerminal(job, (code === 0) ? 'completed' : 'failed', code || 0);
-
-              // Notify completion
-              const duration = Math.round((Date.now() - job.startTime) / 1000);
-              const statusText = `Background job ${job.id} ${job.status} (${duration}s)`;
-              ctx.ui.notify(
-                statusText,
-                job.status === 'completed' ? 'success' : 'error'
-              );
-
-              // Also notify the agent via message (all terminal states)
-              setTimeout(() => {
-                const emoji = job.status === 'completed' ? '✅' : '❌';
-                pi.sendMessage({
-                  customType: "job-completion",
-                  content: `${emoji} ${statusText}\nCommand: ${job.command}`,
-                  display: true,
-                }, {
-                  deliverAs: "followUp",
-                  triggerTurn: true,
-                });
-              }, 0);
-              
-              updateJobsWidget(ctx);
-            }
-          } else {
-            // Normal completion - resolve the tool call
-            resolve(result);
-          }
-        });
-
-        proc.on('error', (err) => {
-          runningProcesses.delete(toolCallId);
-          if (currentlyRunningToolCallId === toolCallId) {
-            currentlyRunningToolCallId = null;
-          }
-
-          if (runningProcess.backgrounded) {
-            // Handle background job error
-            const job = Array.from(backgroundJobs.values())
-              .find(j => j.toolCallId === toolCallId);
-            if (job) {
-              job.output += `\nProcess error: ${err.message}`;
-              markJobTerminal(job, 'failed');
-              
-              const errorText = `Background job ${job.id} failed: ${err.message}`;
-              ctx.ui.notify(errorText, 'error');
-
-              // Also notify the agent via message (errors always reported)
-              setTimeout(() => {
-                pi.sendMessage({
-                  customType: "job-completion",
-                  content: `❌ ${errorText}\nCommand: ${job.command}`,
-                  display: true,
-                }, {
-                  deliverAs: "followUp",
-                  triggerTurn: true,
-                });
-              }, 0);
-
-              updateJobsWidget(ctx);
-            }
-          } else {
-            reject(err);
-          }
-        });
-
-        // Handle abort signal (for normal cancellation)
-        if (signal) {
-          signal.addEventListener('abort', () => {
-            if (!runningProcess.backgrounded) {
-              proc.kill('SIGTERM');
-              runningProcesses.delete(toolCallId);
-              if (currentlyRunningToolCallId === toolCallId) {
-                currentlyRunningToolCallId = null;
-              }
-              reject(new Error('Command cancelled'));
-            }
-          });
-        }
-
-        // Initial output update
-        if (!hasOutput) {
-          setTimeout(() => {
-            if (!runningProcess.backgrounded && onUpdate && !hasOutput) {
-              onUpdate({
-                content: [{ type: "text", text: "Command started..." }],
-                details: { partial: true },
-              });
-            }
-          }, 100);
-        }
-      });
-    },
-  });
-
-  // Register Ctrl+J shortcut for quick jobs access
-  pi.registerShortcut("ctrl+j", {
-    description: "Open background jobs interface",
-    handler: async (ctx) => {
-      await showJobsInterface(ctx);
-    },
-  });
-
-  // Register Ctrl+Shift+B shortcut to background current process
-  pi.registerShortcut("ctrl+shift+b", {
-    description: "Background current bash process",
-    handler: async (ctx) => {
-      if (!currentlyRunningToolCallId) {
-        ctx.ui.notify("No running bash process to background", "warning");
-        return;
-      }
-
-      const runningProcess = runningProcesses.get(currentlyRunningToolCallId);
-      if (!runningProcess || runningProcess.backgrounded) {
-        ctx.ui.notify("No active process to background", "warning");
-        return;
-      }
-
-      // Background the process
-      backgroundProcess(runningProcess, ctx);
-    },
-  });
-
-  // Manual command alias: /bg
-  pi.registerCommand("bg", {
-    description: "Background the currently running bash process",
-    handler: async (_args, ctx) => {
-      if (!currentlyRunningToolCallId) {
-        ctx.ui.notify("No running bash process to background", "warning");
-        return;
-      }
-
-      const runningProcess = runningProcesses.get(currentlyRunningToolCallId);
-      if (!runningProcess || runningProcess.backgrounded) {
-        ctx.ui.notify("No active process to background", "warning");
-        return;
-      }
-
-      backgroundProcess(runningProcess, ctx);
-      ctx.ui.notify("Backgrounded current process via /bg", "info");
-    },
-  });
-
-  function createJobDonePromise(job: BackgroundJob): void {
-    let resolveDone: (() => void) | undefined;
-    job.donePromise = new Promise<void>((resolve) => {
-      resolveDone = resolve;
-    });
-    job.resolveDone = resolveDone;
-  }
-
-  function markJobTerminal(job: BackgroundJob, status: 'completed' | 'failed', exitCode?: number): void {
-    job.status = status;
-    job.exitCode = exitCode;
-    delete job.proc;
-    if (job.resolveDone) {
-      job.resolveDone();
-      delete job.resolveDone;
-    }
-  }
-
-  function backgroundProcess(runningProcess: RunningProcess, ctx: ExtensionContext) {
-    const jobId = `job-${++jobCounter}`;
-    const job: BackgroundJob = {
-      id: jobId,
-      command: runningProcess.command,
-      pid: runningProcess.proc.pid!,
-      startTime: Date.now(),
-      status: 'running',
-      output: '',
-      proc: runningProcess.proc,
-      toolCallId: runningProcess.toolCallId,
-    };
-    createJobDonePromise(job);
-
-    // Mark as backgrounded
-    runningProcess.backgrounded = true;
-    backgroundJobs.set(jobId, job);
-    
-    // Clear current tracking
-    currentlyRunningToolCallId = null;
-
-    // Resolve the original tool call immediately with backgrounded status
-    if (runningProcess.resolve) {
-      runningProcess.resolve({
-        content: [{
-          type: "text",
-          text: `Process backgrounded as ${jobId}\nCommand: ${runningProcess.command}\nPID: ${job.pid}`
-        }],
-        details: {
-          backgrounded: true,
-          jobId,
-          pid: job.pid,
-          command: runningProcess.command,
-        },
-      });
-    }
-
-    ctx.ui.notify(`Process backgrounded as ${jobId}`, "info");
-    // Remove updateJobsWidget call - UI operations during critical operations interfere with conversation flow
-  }
-
-  function getJobOutputSnapshot(job: BackgroundJob, maxChars: number = 12000): string {
-    const output = job.output || "(no output yet)";
-    if (output.length <= maxChars) return output;
-    return `...[truncated, showing last ${maxChars} chars]\n${output.slice(-maxChars)}`;
-  }
-
-  function formatJobLine(job: BackgroundJob): string {
-    const duration = Math.round((Date.now() - job.startTime) / 1000);
-    const status = job.status === 'running' ? `⏳ running (${duration}s)`
-      : job.status === 'completed' ? '✅ completed'
-      : '❌ failed';
-    return `${job.id}: ${job.command.slice(0, 80)} - ${status}`;
-  }
-
-  async function attachJob(
-    job: BackgroundJob,
-    options?: {
-      waitForCompletion?: boolean;
-      signal?: AbortSignal;
-      onProgress?: (text: string) => void;
-    },
-  ): Promise<{ status: BackgroundJob['status']; output: string }> {
-    const waitForCompletion = options?.waitForCompletion ?? true;
-
-    if (job.status === 'running' && waitForCompletion) {
-      if (!job.donePromise || !job.resolveDone) {
-        createJobDonePromise(job);
-      }
-
-      let lastLen = -1;
-      const tick = setInterval(() => {
-        if (job.output.length !== lastLen) {
-          lastLen = job.output.length;
-          options?.onProgress?.(`Attaching to ${job.id}: captured ${lastLen} chars...`);
-        }
-      }, 1000);
-
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = () => reject(new Error("Attach cancelled"));
-          options?.signal?.addEventListener("abort", onAbort, { once: true });
-          job.donePromise!.then(() => {
-            options?.signal?.removeEventListener("abort", onAbort);
-            resolve();
-          }).catch(reject);
-        });
-      } finally {
-        clearInterval(tick);
-      }
-    }
-
-    return {
-      status: job.status,
-      output: getJobOutputSnapshot(job),
-    };
-  }
-
-  // Jobs tool: agent-manageable lifecycle (list/output/kill/attach)
-  pi.registerTool({
-    name: "jobs",
-    label: "Background Jobs",
-    description: "List, inspect, kill, or attach to background jobs",
-    parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("list"),
-        Type.Literal("output"),
-        Type.Literal("kill"),
-        Type.Literal("attach"),
-      ]),
-      jobId: Type.Optional(Type.String({ description: "Job ID for output/kill/attach" })),
-      wait: Type.Optional(Type.Boolean({ description: "For attach: wait for completion (default true)" })),
-    }),
-
-    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-      switch (params.action) {
-        case "list": {
-          const jobs = Array.from(backgroundJobs.values());
-          const lines = jobs.map(formatJobLine);
-          return {
-            content: [{
-              type: "text",
-              text: lines.length > 0 ? `Background Jobs:\n${lines.join("\n")}` : "No background jobs",
-            }],
-            details: { count: jobs.length },
-          };
-        }
-
-        case "output": {
-          if (!params.jobId) throw new Error("jobId is required for action=output");
-          const job = backgroundJobs.get(params.jobId);
-          if (!job) throw new Error(`Job not found: ${params.jobId}`);
-          return {
-            content: [{
-              type: "text",
-              text: `Output for ${job.id} (${job.status})\n\n${getJobOutputSnapshot(job)}`,
-            }],
-            details: { jobId: job.id, status: job.status },
-          };
-        }
-
-        case "kill": {
-          if (!params.jobId) throw new Error("jobId is required for action=kill");
-          const job = backgroundJobs.get(params.jobId);
-          if (!job) throw new Error(`Job not found: ${params.jobId}`);
-          if (job.status !== 'running' || !job.proc) {
-            throw new Error(`Job is not running: ${job.id}`);
-          }
-          job.proc.kill('SIGTERM');
-          markJobTerminal(job, 'failed');
-          return {
-            content: [{ type: "text", text: `Sent SIGTERM to ${job.id}` }],
-            details: { jobId: job.id },
-          };
-        }
-
-        case "attach": {
-          if (!params.jobId) throw new Error("jobId is required for action=attach");
-          const job = backgroundJobs.get(params.jobId);
-          if (!job) throw new Error(`Job not found: ${params.jobId}`);
-
-          const wait = params.wait ?? true;
-          onUpdate?.({
-            content: [{ type: "text", text: `Attaching to ${job.id} (${job.status})...` }],
-            details: { partial: true },
-          });
-
-          const attached = await attachJob(job, {
-            waitForCompletion: wait,
-            signal,
-            onProgress: (text) => {
-              onUpdate?.({ content: [{ type: "text", text }], details: { partial: true } });
-            },
-          });
-
-          return {
-            content: [{
-              type: "text",
-              text: `Attach finished for ${job.id}. Status: ${attached.status}\n\n${attached.output}`,
-            }],
-            details: { jobId: job.id, status: attached.status },
-          };
-        }
-      }
-    },
-  });
-
-  // Shared function for job management interface
-  async function showJobsInterface(ctx: ExtensionContext) {
-    const jobs = Array.from(backgroundJobs.values());
-    
-    if (jobs.length === 0) {
-      ctx.ui.notify("No background jobs", "info");
-      return;
-    }
-
-    const choice = await ctx.ui.select(
-      "Background Jobs",
-      jobs.map(job => {
-        const duration = Math.round((Date.now() - job.startTime) / 1000);
-        const status = job.status === 'running' ? `⏳ (${duration}s)` 
-                     : job.status === 'completed' ? '✅'
-                     : '❌';
-        return `${status} ${job.id}: ${job.command.slice(0, 40)}`;
-      })
-    );
-    
-    if (choice !== undefined) {
-      const job = jobs[choice];
-      const actions = job.status === 'running'
-        ? ["Attach Foreground", "Show Output", "Kill Job"]
-        : ["Show Output", "Remove from List"];
-
-      const action = await ctx.ui.select(`Job: ${job.id}`, actions);
-
-      if (job.status === 'running') {
-        if (action === 0) { // Attach Foreground
-          ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
-          const attached = await attachJob(job, {
-            waitForCompletion: true,
-            onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
-          });
-          ctx.ui.setStatus("bg-fg", undefined);
-          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
-          pi.sendMessage({
-            customType: "bg-attach",
-            content: fullText,
-            display: true,
-          }, {
-            deliverAs: "steer",
-            triggerTurn: false,
-          });
-          ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
-        } else if (action === 1) { // Show Output
-          const text = getJobOutputSnapshot(job);
-          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
-          await ctx.ui.editor(`Output for ${job.id}`, fullText);
-        } else if (action === 2 && job.proc) { // Kill
-          job.proc.kill('SIGTERM');
-          markJobTerminal(job, 'failed');
-          ctx.ui.notify(`Killed job ${job.id}`, "info");
-        }
-      } else {
-        if (action === 0) { // Show Output
-          const text = getJobOutputSnapshot(job);
-          const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\nPID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n\n--- OUTPUT ---\n${text}`;
-          await ctx.ui.editor(`Output for ${job.id}`, fullText);
-        } else if (action === 1) { // Remove from List
-          backgroundJobs.delete(job.id);
-          ctx.ui.notify(`Removed job ${job.id}`, "info");
-        }
-      }
-    }
-  }
-
-  // Interactive command for job management
-  pi.registerCommand("jobs", {
-    description: "Show and manage background jobs interactively",
-    handler: async (_args, ctx) => {
-      await showJobsInterface(ctx);
-    },
-  });
-
-  // Manual foreground attach command
-  pi.registerCommand("fg", {
-    description: "Attach to a background job (/fg [job-id] [--snapshot]); defaults to most recent running job",
-    handler: async (args, ctx) => {
-      const parts = args.trim().split(/\s+/).filter(Boolean);
-      const snapshot = parts.includes("--snapshot") || parts.includes("-s");
-      const explicitJobId = parts.find((p) => !p.startsWith("-"));
-
-      let job: BackgroundJob | undefined;
-      if (explicitJobId) {
-        job = backgroundJobs.get(explicitJobId);
-        if (!job) {
-          ctx.ui.notify(`Job not found: ${explicitJobId}`, "error");
-          return;
-        }
-      } else {
-        job = Array.from(backgroundJobs.values())
-          .filter((j) => j.status === "running")
-          .sort((a, b) => b.startTime - a.startTime)[0];
-
-        if (!job) {
-          ctx.ui.notify("No running background jobs to attach. Usage: /fg [job-id] [--snapshot]", "warning");
-          return;
-        }
-      }
-
-      ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${snapshot ? " (snapshot mode)" : ""}...`);
-      try {
-        const attached = await attachJob(job, {
-          waitForCompletion: !snapshot,
-          onProgress: (text) => ctx.ui.setStatus("bg-fg", text),
-        });
-        const fullText = `Job: ${job.id}\nCommand: ${job.command}\nStatus: ${attached.status}\n\n--- OUTPUT ---\n${attached.output}`;
-        pi.sendMessage({
-          customType: "bg-attach",
-          content: fullText,
-          display: true,
-        }, {
-          deliverAs: "steer",
-          triggerTurn: false,
-        });
-        ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
-      } finally {
-        ctx.ui.setStatus("bg-fg", undefined);
-      }
-    },
-  });
-
-  // Direct background bash tool for planned backgrounding
-  pi.registerTool({
-    name: "bash_bg", 
-    label: "Background Bash",
-    description: "Run bash command in background immediately (doesn't stream to foreground)",
-    promptSnippet: "Run bash command in background without blocking conversation",
-    promptGuidelines: [
-      "Use this when you want to start a long-running command in background immediately",
-      "Different from regular bash + Ctrl+B - this backgrounds from the start"
-    ],
-    parameters: Type.Object({
-      command: Type.String({ description: "Command to run in background" }),
-      notify: Type.Optional(Type.Boolean({ description: "Notify when complete (default: true)" })),
-    }),
-
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const jobId = `job-${++jobCounter}`;
-      const shouldNotify = params.notify !== false;
-
-      // Spawn background process immediately
-      const proc = spawn('bash', ['-c', params.command], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: ctx.cwd,
-        detached: true, // Allow process to continue independently
-        env: { ...process.env }, // Inherit environment
-      });
-
-      if (!proc.pid) {
-        throw new Error("Failed to spawn background process");
-      }
-
-      const job: BackgroundJob = {
-        id: jobId,
-        command: params.command,
-        pid: proc.pid,
-        startTime: Date.now(),
-        status: 'running',
-        output: '',
-        proc,
-        toolCallId,
-      };
-      createJobDonePromise(job);
-
-      backgroundJobs.set(jobId, job);
-
-      // Collect output
-      proc.stdout?.on('data', (data) => {
-        job.output += data.toString();
-      });
-
-      proc.stderr?.on('data', (data) => {
-        job.output += data.toString();
-      });
-
-      // Handle completion
-      proc.on('close', (code) => {
-        markJobTerminal(job, (code === 0) ? 'completed' : 'failed', code || 0);
-
-        if (shouldNotify) {
-          const duration = Math.round((Date.now() - job.startTime) / 1000);
-          const statusText = `Background job ${jobId} ${job.status} (${duration}s)`;
-          ctx.ui.notify(
-            statusText,
-            job.status === 'completed' ? 'success' : 'error'
-          );
-
-          // Also notify the agent via message (all terminal states)
-          setTimeout(() => {
-            const emoji = job.status === 'completed' ? '✅' : '❌';
-            pi.sendMessage({
-              customType: "job-completion",
-              content: `${emoji} ${statusText}\nCommand: ${job.command}`,
-              display: true,
-            }, {
-              deliverAs: "followUp",
-              triggerTurn: true,
-            });
-          }, 0);
-        }
-        
-        // Remove updateJobsWidget call - UI operations in async handlers interfere with conversation flow
-      });
-
-      proc.on('error', (err) => {
-        job.output += `\nProcess error: ${err.message}`;
-        markJobTerminal(job, 'failed');
-        
-        if (shouldNotify) {
-          const errorText = `Background job ${jobId} failed: ${err.message}`;
-          ctx.ui.notify(errorText, 'error');
-
-          // Also notify the agent via message (errors always reported)
-          setTimeout(() => {
-            pi.sendMessage({
-              customType: "job-completion",
-              content: `❌ ${errorText}\nCommand: ${job.command}`,
-              display: true,
-            }, {
-              deliverAs: "followUp",
-              triggerTurn: true,
-            });
-          }, 0);
-        }
-        
-        // Remove updateJobsWidget call - UI operations in async handlers interfere with conversation flow
-      });
-
-      // Remove updateJobsWidget call - UI operations during tool execution interfere with conversation flow
-
-      return {
-        content: [{ 
-          type: "text", 
-          text: `Started background job ${jobId}\nCommand: ${params.command}\nPID: ${proc.pid}` 
-        }],
-        details: { jobId, pid: proc.pid, command: params.command },
-      };
-    },
-  });
-
-  function updateJobsWidget(ctx: ExtensionContext) {
-    const runningJobs = Array.from(backgroundJobs.values())
-      .filter(job => job.status === 'running');
-
-    if (runningJobs.length === 0) {
-      ctx.ui.setWidget("background-jobs", undefined);
-      ctx.ui.setStatus("background-jobs", undefined);
-      return;
-    }
-
-    // Widget showing job details
-    const lines = runningJobs.map(job => {
-      const duration = Math.round((Date.now() - job.startTime) / 1000);
-      const mins = Math.floor(duration / 60);
-      const secs = duration % 60;
-      const timeStr = mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
-      return `⏳ ${job.id}: ${job.command.slice(0, 35)} (${timeStr})`;
-    });
-
-    ctx.ui.setWidget("background-jobs", lines, { 
-      placement: "aboveEditor" 
-    });
-
-    // Status bar summary
-    const completedJobs = Array.from(backgroundJobs.values())
-      .filter(job => job.status === 'completed').length;
-    const failedJobs = Array.from(backgroundJobs.values())
-      .filter(job => job.status === 'failed').length;
-    
-    let statusText = `${runningJobs.length} running`;
-    if (completedJobs > 0) statusText += `, ${completedJobs} done`;
-    if (failedJobs > 0) statusText += `, ${failedJobs} failed`;
-    
-    ctx.ui.setStatus("background-jobs", ctx.ui.theme.fg("accent", `🔄 ${statusText}`));
-  }
-
-  // Persistence: save state to session entries
-  function persistState() {
-    pi.appendEntry("background-tasks-state", {
-      jobs: Array.from(backgroundJobs.entries()).map(([id, job]) => [id, {
-        ...job,
-        proc: undefined, // Don't serialize process objects
-      }]),
-      jobCounter,
-    });
-  }
-
-  // Restore state on session start
-  pi.on("session_start", async (_event, ctx) => {
-    // Restore state from session entries
-    const entries = ctx.sessionManager.getEntries();
-    for (const entry of entries) {
-      if (entry.type === "custom" && entry.customType === "background-tasks-state") {
-        const data = entry.data as any;
-        if (data.jobs) {
-          // Only restore completed/failed jobs (running jobs can't be restored)
-          for (const [id, jobData] of data.jobs) {
-            if (jobData.status !== 'running') {
-              backgroundJobs.set(id, jobData);
-            }
-          }
-        }
-        if (typeof data.jobCounter === 'number') {
-          jobCounter = Math.max(jobCounter, data.jobCounter);
-        }
-        break;
-      }
-    }
-    
-    updateJobsWidget(ctx);
-  });
-
-  // Only persist on shutdown to avoid interfering with conversation flow
-  pi.on("session_shutdown", async () => {
-    // Kill all running background jobs
-    for (const job of backgroundJobs.values()) {
-      if (job.proc && job.status === 'running') {
-        job.proc.kill('SIGTERM');
-      }
-    }
-    persistState();
-  });
+	const backgroundJobs = new Map<string, BackgroundJob>();
+	const runningProcesses = new Map<string, RunningProcess>();
+	let jobCounter = 0;
+
+	/** Currently running bash toolCallId (for Ctrl+Shift+B) */
+	let currentlyRunningToolCallId: string | null = null;
+
+	// ── Widget / status bar ────────────────────────────────────────────
+
+	function updateWidget(ctx: UiContext): void {
+		const runningJobs = Array.from(backgroundJobs.values())
+			.filter(job => job.status === "running");
+
+		if (runningJobs.length === 0) {
+			ctx.ui.setWidget("background-jobs", undefined);
+			ctx.ui.setStatus("background-jobs", undefined);
+			return;
+		}
+
+		const lines = runningJobs.map(job => {
+			const duration = formatDuration(Date.now() - job.startTime);
+			return `⏳ ${job.id}: ${job.command.slice(0, 35)} (${duration})`;
+		});
+
+		ctx.ui.setWidget("background-jobs", lines);
+
+		const completedJobs = Array.from(backgroundJobs.values())
+			.filter(job => job.status === "completed").length;
+		const failedJobs = Array.from(backgroundJobs.values())
+			.filter(job => job.status === "failed").length;
+
+		let statusText = `${runningJobs.length} running`;
+		if (completedJobs > 0) statusText += `, ${completedJobs} done`;
+		if (failedJobs > 0) statusText += `, ${failedJobs} failed`;
+
+		ctx.ui.setStatus(
+			"background-jobs",
+			ctx.ui.theme.fg("accent", `🔄 ${statusText}`),
+		);
+	}
+
+	/** Send a structured completion notification to the agent. */
+	function notifyCompletion(job: BackgroundJob, ctx: UiContext): void {
+		const duration = formatDuration(Date.now() - job.startTime);
+		const emoji = job.status === "completed" ? "✅" : "❌";
+		const statusText = `Background ${job.id} ${job.status} (${duration})`;
+		const exitCodeText = job.exitCode !== undefined ? `\nExit code: ${job.exitCode}` : "";
+
+		ctx.ui.notify(statusText, job.status === "completed" ? "success" : "error");
+
+		pi.sendMessage({
+			customType: "job-completion",
+			content:
+				`${emoji} ${statusText}\n` +
+				`Command: ${job.command}\n` +
+				`Output: ${job.logPath}${exitCodeText}`,
+			display: true,
+			details: {
+				jobId: job.id,
+				status: job.status,
+				exitCode: job.exitCode,
+				duration,
+				command: job.command,
+				logPath: job.logPath,
+			},
+		}, {
+			deliverAs: "followUp",
+			triggerTurn: true,
+		});
+	}
+
+	// ── Background a running foreground process ────────────────────────
+
+	function backgroundProcess(rp: RunningProcess, ctx: UiContext): void {
+		const jobId = generateJobId(++jobCounter);
+		const path = logPathForJob(jobId);
+
+		const job: BackgroundJob = {
+			id: jobId,
+			command: rp.command,
+			pid: rp.proc.pid!,
+			startTime: Date.now(),
+			status: "running",
+			logPath: path,
+			proc: rp.proc,
+			toolCallId: rp.toolCallId,
+		};
+		createJobDonePromise(job);
+
+		rp.backgrounded = true;
+		backgroundJobs.set(jobId, job);
+		currentlyRunningToolCallId = null;
+
+		// Remove the foreground data listeners so output goes to file only.
+		if (rp.stdoutListener) rp.proc.stdout?.removeListener("data", rp.stdoutListener);
+		if (rp.stderrListener) rp.proc.stderr?.removeListener("data", rp.stderrListener);
+
+		// Pipe remaining output to the log file.
+		rp.logStream = createWriteStream(path, { flags: "a" });
+		rp.proc.stdout?.pipe(rp.logStream, { end: false });
+		rp.proc.stderr?.pipe(rp.logStream, { end: false });
+
+		// Start stall watchdog (with kill-on-oversize)
+		const cancelStall = startStallWatchdog(jobId, rp.command, path, pi, () => {
+			if (rp.proc.pid) killProcessGroup(rp.proc.pid, "SIGTERM");
+			markJobTerminal(backgroundJobs.get(jobId)!, "killed");
+		});
+
+		// Close the log file when the process exits.
+		rp.proc.on("close", () => {
+			cancelStall();
+			if (rp.logStream) { rp.logStream.end(); rp.logStream = undefined; }
+		});
+
+		// Resolve the original tool call immediately with backgrounded status
+		if (rp.resolve) {
+			rp.resolve({
+				content: [{
+					type: "text" as const,
+					text: `Process backgrounded as ${jobId}\nCommand: ${rp.command}\nPID: ${job.pid}\nOutput: ${path}`,
+				}],
+				details: undefined,
+			});
+		}
+
+		ctx.ui.notify(`Process backgrounded as ${jobId}`, "info");
+		updateWidget(ctx);
+	}
+
+	// ── Default timeout timer ─────────────────────────────────────────
+
+	function startTimeoutTimer(
+		rp: RunningProcess,
+		ctx: UiContext,
+	): NodeJS.Timeout {
+		const timer = setTimeout(() => {
+			if (currentlyRunningToolCallId !== rp.toolCallId) return;
+			if (rp.backgrounded) return;
+
+			// Background the process to unblock the agent loop.
+			backgroundProcess(rp, ctx);
+
+			// Find the job we just created and ask the agent what to do.
+			const job = Array.from(backgroundJobs.values())
+				.find(j => j.toolCallId === rp.toolCallId);
+			if (!job) return;
+
+			const duration = formatDuration(DEFAULT_TIMEOUT_MS);
+			pi.sendMessage({
+				customType: "bg-timeout",
+				content:
+					`\u23f0 Command timed out after ${duration} and has been backgrounded as ${job.id}.\n` +
+					`Command: ${rp.command}\n` +
+					`PID: ${job.pid}\n` +
+					`Output so far: ${job.logPath}\n\n` +
+				`Choose one:\n` +
+				`- Use the jobs tool with action "kill" and jobId "${job.id}" to terminate it.\n` +
+				`- Use the jobs tool with action "output" and jobId "${job.id}" to check progress.\n` +
+				`- Do nothing and it will continue running in the background.`,
+				display: true,
+				details: { jobId: job.id, logPath: job.logPath, command: rp.command },
+			}, {
+				deliverAs: "followUp",
+				triggerTurn: true,
+			});
+		}, DEFAULT_TIMEOUT_MS);
+		timer.unref();
+		return timer;
+	}
+
+	// ── Override bash tool ─────────────────────────────────────────────
+
+	const originalBashTool = createBashTool(process.cwd());
+
+	pi.registerTool({
+		...originalBashTool,
+		name: "bash",
+		description:
+			"Execute bash commands with streaming output. Commands that run longer than 2 minutes " +
+			"are automatically backgrounded and the agent is asked whether to kill or let them continue. " +
+			"Use Ctrl+Shift+B to manually background a running process. " +
+			"Background job output is written to /tmp/pi-bg-<jobId>.log.",
+		promptSnippet: "Execute shell commands (backgroundable with Ctrl+Shift+B)",
+		promptGuidelines: [
+			"Use bash_bg when you know a command should run in background from the start.",
+			"Use the jobs tool with action 'list' to check background job status.",
+			"Use the jobs tool with action 'output' to read a background job's output file.",
+		],
+
+		async execute(toolCallId, params, signal, onUpdate, ctx): Promise<AgentToolResult<BashToolDetails | undefined>> {
+			const { command } = params;
+
+			return new Promise<AgentToolResult<BashToolDetails | undefined>>((resolve, reject) => {
+				const proc = spawn("bash", ["-c", command], {
+					stdio: ["pipe", "pipe", "pipe"],
+					cwd: ctx.cwd,
+					detached: true,
+					env: { ...process.env },
+				});
+
+				if (!proc.pid) {
+					reject(new Error("Failed to spawn process"));
+					return;
+				}
+
+				const rp: RunningProcess = {
+					toolCallId,
+					proc,
+					command,
+					backgrounded: false,
+					resolve,
+					reject,
+				};
+
+				runningProcesses.set(toolCallId, rp);
+				currentlyRunningToolCallId = toolCallId;
+
+				let output = "";
+				let outputFd: ReturnType<typeof createWriteStream> | undefined;
+
+				// Stream handler — accumulates output for foreground streaming.
+				// Listeners are removed by backgroundProcess() when the process is backgrounded.
+				function handleData(data: Buffer, _stream: "stdout" | "stderr"): void {
+					const chunk = data.toString();
+					output += chunk;
+
+					// Foreground streaming
+					onUpdate?.({
+						content: [{ type: "text" as const, text: output }],
+						details: undefined,
+					});
+				}
+
+				// Store listener references so backgroundProcess() can remove them later.
+				const stdoutListener = (data: Buffer) => handleData(data, "stdout");
+				const stderrListener = (data: Buffer) => handleData(data, "stderr");
+				rp.stdoutListener = stdoutListener;
+				rp.stderrListener = stderrListener;
+				proc.stdout?.on("data", stdoutListener);
+				proc.stderr?.on("data", stderrListener);
+
+				proc.on("close", (code) => {
+					runningProcesses.delete(toolCallId);
+					if (currentlyRunningToolCallId === toolCallId) {
+						currentlyRunningToolCallId = null;
+					}
+					if (outputFd) { outputFd.end(); outputFd = undefined; }
+					if (rp.logStream) { rp.logStream.end(); rp.logStream = undefined; }
+
+					if (rp.backgrounded) {
+						const job = Array.from(backgroundJobs.values())
+							.find(j => j.toolCallId === toolCallId);
+						if (job) {
+							markJobTerminal(
+								job,
+								code === 0 ? "completed" : "failed",
+								code ?? 0,
+							);
+							notifyCompletion(job, ctx);
+							updateWidget(ctx);
+						}
+					} else {
+						resolve({
+							content: [{ type: "text" as const, text: output || "(no output)" }],
+							details: undefined,
+						});
+					}
+				});
+
+				proc.on("error", (err) => {
+					runningProcesses.delete(toolCallId);
+					if (currentlyRunningToolCallId === toolCallId) {
+						currentlyRunningToolCallId = null;
+					}
+					if (outputFd) { outputFd.end(); outputFd = undefined; }
+					if (rp.logStream) { rp.logStream.end(); rp.logStream = undefined; }
+
+					if (rp.backgrounded) {
+						const job = Array.from(backgroundJobs.values())
+							.find(j => j.toolCallId === toolCallId);
+						if (job) {
+							markJobTerminal(job, "failed");
+							notifyCompletion(job, ctx);
+							updateWidget(ctx);
+						}
+					} else {
+						reject(err);
+					}
+				});
+
+				// Handle abort signal (for normal cancellation, not backgrounding)
+				if (signal) {
+					signal.addEventListener("abort", () => {
+						if (!rp.backgrounded) {
+							killProcessGroup(proc.pid!, "SIGTERM");
+							runningProcesses.delete(toolCallId);
+							if (currentlyRunningToolCallId === toolCallId) {
+								currentlyRunningToolCallId = null;
+							}
+							reject(new Error("Command cancelled"));
+						}
+					});
+				}
+
+				// Default timeout — backgrounds and asks the agent what to do
+				startTimeoutTimer(rp, ctx);
+			});
+		},
+	});
+
+	// ── bash_bg tool — start in background immediately ─────────────────
+
+	pi.registerTool({
+		name: "bash_bg",
+		label: "Background Bash",
+		description:
+			"Run a bash command in background immediately. Output is written to /tmp/pi-bg-<jobId>.log. " +
+			"Use the jobs tool to check status and read output.",
+		promptSnippet: "Run bash command in background without blocking conversation",
+		promptGuidelines: [
+			"Use bash_bg when you want to start a long-running command in background immediately.",
+			"This is different from regular bash + Ctrl+Shift+B — bash_bg backgrounds from the start.",
+		],
+		parameters: Type.Object({
+			command: Type.String({ description: "Command to run in background" }),
+			notify: Type.Optional(Type.Boolean({ description: "Notify when complete (default: true)" })),
+		}),
+
+		async execute(toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<undefined>> {
+			const jobId = generateJobId(++jobCounter);
+			const path = logPathForJob(jobId);
+			const shouldNotify = params.notify !== false;
+
+			const proc = spawn("bash", ["-c", params.command], {
+				stdio: ["pipe", "pipe", "pipe"],
+				cwd: ctx.cwd,
+				detached: true,
+				env: { ...process.env },
+			});
+
+			if (!proc.pid) {
+				throw new Error("Failed to spawn background process");
+			}
+
+			const job: BackgroundJob = {
+				id: jobId,
+				command: params.command,
+				pid: proc.pid,
+				startTime: Date.now(),
+				status: "running",
+				logPath: path,
+				proc,
+				toolCallId,
+			};
+			createJobDonePromise(job);
+			backgroundJobs.set(jobId, job);
+
+			// Write output to log file
+			const logStream = createWriteStream(path, { flags: "a" });
+			proc.stdout?.pipe(logStream, { end: false });
+			proc.stderr?.pipe(logStream, { end: false });
+
+			// Stall watchdog
+			// Stall watchdog (with kill-on-oversize)
+			const cancelStall = startStallWatchdog(jobId, params.command, path, pi, () => {
+				if (proc.pid) killProcessGroup(proc.pid, "SIGTERM");
+				markJobTerminal(job, "killed");
+			});
+
+			proc.on("close", (code) => {
+				cancelStall();
+				logStream.end();
+				markJobTerminal(job, code === 0 ? "completed" : "failed", code ?? 0);
+
+				if (shouldNotify) {
+					notifyCompletion(job, ctx);
+				}
+				updateWidget(ctx);
+			});
+
+			proc.on("error", (err) => {
+				cancelStall();
+				logStream.end();
+				markJobTerminal(job, "failed");
+				if (shouldNotify) {
+					notifyCompletion(job, ctx);
+				}
+				updateWidget(ctx);
+			});
+
+			updateWidget(ctx);
+
+			return {
+				content: [{
+					type: "text" as const,
+					text: `Started background job ${jobId}\nCommand: ${params.command}\nPID: ${proc.pid}\nOutput: ${path}`,
+				}],
+				details: undefined,
+			};
+		},
+	});
+
+	// ── jobs tool ──────────────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "jobs",
+		label: "Background Jobs",
+		description: "List, inspect, kill, or attach to background jobs. Output is read from disk files.",
+		promptSnippet: "Manage background jobs (list/output/kill/attach)",
+		promptGuidelines: [
+			"Use jobs with action 'list' to see all background jobs.",
+			"Use jobs with action 'output' to read a job's output from its log file.",
+			"Use jobs with action 'kill' to terminate a running background job.",
+			"Use jobs with action 'attach' to wait for a running job and get its final output.",
+		],
+		parameters: Type.Object({
+			action: StringEnum(["list", "output", "kill", "attach"] as const, {
+				description: "Action to perform",
+			}),
+			jobId: Type.Optional(Type.String({ description: "Job ID for output/kill/attach" })),
+			wait: Type.Optional(Type.Boolean({ description: "For attach: wait for completion (default true)" })),
+		}),
+
+		async execute(_toolCallId, params, signal, onUpdate, _ctx): Promise<AgentToolResult<undefined>> {
+			switch (params.action) {
+				case "list": {
+					const jobs = Array.from(backgroundJobs.values());
+					const lines = jobs.map(formatJobLine);
+					return {
+						content: [{
+							type: "text" as const,
+							text: lines.length > 0
+								? `Background Jobs:\n${lines.join("\n")}`
+								: "No background jobs",
+						}],
+						details: undefined,
+					};
+				}
+
+				case "output": {
+					if (!params.jobId) throw new Error("jobId is required for action=output");
+					const job = backgroundJobs.get(params.jobId);
+					if (!job) throw new Error(`Job not found: ${params.jobId}`);
+					const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+					return {
+						content: [{
+							type: "text" as const,
+							text: `Output for ${job.id} (${job.status})\nLog: ${job.logPath}\n\n${output}`,
+						}],
+						details: undefined,
+					};
+				}
+
+				case "kill": {
+					if (!params.jobId) throw new Error("jobId is required for action=kill");
+					const job = backgroundJobs.get(params.jobId);
+					if (!job) throw new Error(`Job not found: ${params.jobId}`);
+					if (job.status !== "running" || !job.proc) {
+						throw new Error(`Job is not running: ${job.id}`);
+					}
+					killProcessGroup(job.proc.pid!, "SIGTERM");
+					markJobTerminal(job, "killed");
+					return {
+						content: [{ type: "text" as const, text: `Sent SIGTERM to ${job.id} (process group)` }],
+						details: undefined,
+					};
+				}
+
+				case "attach": {
+					if (!params.jobId) throw new Error("jobId is required for action=attach");
+					const job = backgroundJobs.get(params.jobId);
+					if (!job) throw new Error(`Job not found: ${params.jobId}`);
+
+					const waitForCompletion = params.wait ?? true;
+
+					if (job.status === "running" && waitForCompletion) {
+						if (!job.donePromise) createJobDonePromise(job);
+
+						onUpdate?.({
+							content: [{ type: "text" as const, text: `Attaching to ${job.id} (${job.status})...` }],
+							details: undefined,
+						});
+
+						await job.donePromise;
+					}
+
+					const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+					return {
+						content: [{
+							type: "text" as const,
+							text: `Attach finished for ${job.id}. Status: ${job.status}\nLog: ${job.logPath}\n\n${output}`,
+						}],
+						details: undefined,
+					};
+				}
+			}
+		},
+	});
+
+	// ── Keyboard shortcuts ─────────────────────────────────────────────
+
+	async function handleBackgroundShortcut(ctx: UiContext): Promise<void> {
+		if (!currentlyRunningToolCallId) {
+			ctx.ui.notify("No running bash process to background", "warning");
+			return;
+		}
+
+		const rp = runningProcesses.get(currentlyRunningToolCallId);
+		if (!rp || rp.backgrounded) {
+			ctx.ui.notify("No active process to background", "warning");
+			return;
+		}
+
+		backgroundProcess(rp, ctx);
+	}
+
+	pi.registerShortcut("ctrl+shift+b", {
+		description: "Background current bash process",
+		handler: handleBackgroundShortcut,
+	});
+
+	pi.registerShortcut("ctrl+j", {
+		description: "Open background jobs interface",
+		handler: async (ctx) => {
+			await showJobsInterface(ctx);
+		},
+	});
+
+	// ── Commands ───────────────────────────────────────────────────────
+
+	pi.registerCommand("bg", {
+		description: "Background the currently running bash process",
+		handler: async (_args, ctx) => {
+			if (!currentlyRunningToolCallId) {
+				ctx.ui.notify("No running bash process to background", "warning");
+				return;
+			}
+
+			const rp = runningProcesses.get(currentlyRunningToolCallId);
+			if (!rp || rp.backgrounded) {
+				ctx.ui.notify("No active process to background", "warning");
+				return;
+			}
+
+			backgroundProcess(rp, ctx);
+		},
+	});
+
+	pi.registerCommand("fg", {
+		description: "Attach to a background job (/fg [job-id] [--snapshot]); defaults to most recent running job",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter(Boolean);
+			const snapshot = parts.includes("--snapshot") || parts.includes("-s");
+			const explicitJobId = parts.find(p => !p.startsWith("-"));
+
+			let job: BackgroundJob | undefined;
+			if (explicitJobId) {
+				job = backgroundJobs.get(explicitJobId);
+				if (!job) {
+					ctx.ui.notify(`Job not found: ${explicitJobId}`, "error");
+					return;
+				}
+			} else {
+				job = Array.from(backgroundJobs.values())
+					.filter(j => j.status === "running")
+					.sort((a, b) => b.startTime - a.startTime)[0];
+
+				if (!job) {
+					ctx.ui.notify("No running background jobs to attach. Usage: /fg [job-id] [--snapshot]", "warning");
+					return;
+				}
+			}
+
+			ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}${snapshot ? " (snapshot mode)" : ""}...`);
+			try {
+				if (!snapshot && job.status === "running") {
+					if (!job.donePromise) createJobDonePromise(job);
+					await job.donePromise;
+				}
+
+				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+				const fullText =
+					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
+					`PID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n` +
+					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
+
+				pi.sendMessage({
+					customType: "bg-attach",
+					content: fullText,
+					display: true,
+					details: { jobId: job.id, logPath: job.logPath },
+				}, {
+					deliverAs: "steer",
+					triggerTurn: false,
+				});
+				ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
+			} finally {
+				ctx.ui.setStatus("bg-fg", undefined);
+			}
+		},
+	});
+
+	pi.registerCommand("jobs", {
+		description: "Show and manage background jobs interactively",
+		handler: async (_args, ctx) => {
+			await showJobsInterface(ctx);
+		},
+	});
+
+	// ── Interactive jobs interface ──────────────────────────────────────
+
+	async function showJobsInterface(ctx: UiContext): Promise<void> {
+		const jobs = Array.from(backgroundJobs.values());
+
+		if (jobs.length === 0) {
+			ctx.ui.notify("No background jobs", "info");
+			return;
+		}
+
+		const choice = await ctx.ui.select(
+			"Background Jobs",
+			jobs.map(job => {
+				const duration = formatDuration(Date.now() - job.startTime);
+				const status =
+					job.status === "running" ? `⏳ (${duration})` :
+					job.status === "completed" ? "✅" :
+					job.status === "failed" ? "❌" :
+					"🛑";
+				return `${status} ${job.id}: ${job.command.slice(0, 40)}`;
+			}),
+		);
+
+		if (choice === undefined) return;
+		const job = jobs[choice];
+
+		const actions = job.status === "running"
+			? ["Attach Foreground", "Show Output", "Kill Job"]
+			: ["Show Output", "Remove from List"];
+
+		const action = await ctx.ui.select(`Job: ${job.id}`, actions);
+		if (action === undefined) return;
+
+		if (job.status === "running") {
+			if (action === 0) {
+				// Attach Foreground
+				ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
+				if (!job.donePromise) createJobDonePromise(job);
+				await job.donePromise;
+				ctx.ui.setStatus("bg-fg", undefined);
+
+				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+				const fullText =
+					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
+					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
+
+				pi.sendMessage({
+					customType: "bg-attach",
+					content: fullText,
+					display: true,
+					details: { jobId: job.id, logPath: job.logPath },
+				}, {
+					deliverAs: "steer",
+					triggerTurn: false,
+				});
+				ctx.ui.notify(`Attached output posted for ${job.id}`, "info");
+			} else if (action === 1) {
+				// Show Output
+				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+				const fullText =
+					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
+					`PID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n` +
+					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
+				await ctx.ui.editor(`Output for ${job.id}`, fullText);
+			} else if (action === 2 && job.proc) {
+				// Kill
+				killProcessGroup(job.proc.pid!, "SIGTERM");
+				markJobTerminal(job, "killed");
+				ctx.ui.notify(`Killed job ${job.id} (process group)`, "info");
+				updateWidget(ctx);
+			}
+		} else {
+			if (action === 0) {
+				// Show Output
+				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+				const fullText =
+					`Job: ${job.id}\nCommand: ${job.command}\nStatus: ${job.status}\n` +
+					`PID: ${job.pid}\nStarted: ${new Date(job.startTime).toLocaleString()}\n` +
+					`Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`;
+				await ctx.ui.editor(`Output for ${job.id}`, fullText);
+			} else if (action === 1) {
+				// Remove from List
+				backgroundJobs.delete(job.id);
+				ctx.ui.notify(`Removed job ${job.id}`, "info");
+				updateWidget(ctx);
+			}
+		}
+	}
+
+	// ── Lifecycle events ───────────────────────────────────────────────
+
+	pi.on("session_start", async (_event, ctx) => {
+		// Restore persisted state
+		const entries = ctx.sessionManager.getEntries();
+		for (const entry of entries) {
+			if (entry.type === "custom" && entry.customType === "background-tasks-state") {
+				const data = entry.data as {
+					jobs?: Array<[string, Omit<BackgroundJob, "proc" | "donePromise" | "resolveDone">]>;
+					jobCounter?: number;
+				};
+				if (data.jobs) {
+					for (const [id, jobData] of data.jobs) {
+						if (jobData.status !== "running") {
+							backgroundJobs.set(id, jobData as BackgroundJob);
+						}
+					}
+				}
+				if (typeof data.jobCounter === "number") {
+					jobCounter = Math.max(jobCounter, data.jobCounter);
+				}
+				break;
+			}
+		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		// Kill all running background jobs
+		for (const job of backgroundJobs.values()) {
+			if (job.proc && job.status === "running") {
+				killProcessGroup(job.proc.pid!, "SIGTERM");
+			}
+		}
+
+		// Persist state
+		pi.appendEntry("background-tasks-state", {
+			jobs: Array.from(backgroundJobs.entries()).map(([id, job]) => [id, {
+				...job,
+				proc: undefined,
+				donePromise: undefined,
+				resolveDone: undefined,
+			}]),
+			jobCounter,
+		});
+	});
 }
