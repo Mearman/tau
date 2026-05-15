@@ -1,3 +1,9 @@
+## [1.4.4](https://github.com/Mearman/tau/compare/v1.4.3...v1.4.4) (2026-05-15)
+
+### Refactoring
+
+* move source files into src/ ([506e4cb](https://github.com/Mearman/tau/commit/506e4cb94f8866941d3f57eaec6dd4c6272ee2d4))
+
 ## [1.4.3](https://github.com/Mearman/tau/compare/v1.4.2...v1.4.3) (2026-05-15)
 
 ### Bug Fixes
