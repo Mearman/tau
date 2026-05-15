@@ -1,29 +1,37 @@
 /**
- * Tau (τ) — Background Tasks Extension for pi
+ * Tau (τ) — Quality-of-Life Extension for pi
  *
- * Aligns with Claude Code's Ctrl+B background UX:
+ * Background tasks (Claude Code Ctrl+B UX):
  * - Ctrl+B backgrounds bash processes, backgrounds the agent loop, or resumes
  * - Background hint after 2s of agent activity
- * - 2-minute default timeout: auto-backgrounds and asks the agent to decide
+ * - 15s default timeout: auto-backgrounds and asks the agent to decide
  * - Pill bar at the bottom showing running background tasks
  * - Output written to disk files (/tmp/pi-bg-<jobId>.log)
  * - Process-group kill via process.kill(-pid)
  * - Stall detection and size watchdog
- * - Native terminal notification on agent_end
  *
- * Tools: bash (overridden), bash_bg, jobs
- * Commands: /bg, /fg, /jobs
- * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks), Ctrl+X (kill)
+ * Notifications: native terminal notification on agent_end
+ * Titlebar: braille spinner while agent is active
+ * Status line: elapsed time during agent runs
+ *
+ * Tools: bash (overridden), bash_bg, jobs, todo
+ * Commands: /bg, /fg, /jobs, /todos, /tools, /plan
+ * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks), Ctrl+X (kill), Ctrl+Alt+P (plan mode)
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashTool, type BashToolDetails, type ToolCallEventResult } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { createBashTool, getSettingsListTheme, type BashToolDetails, type ToolCallEventResult } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { Container, type SettingItem, SettingsList, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { Key } from "@earendil-works/pi-tui";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, statSync, existsSync, openSync, readSync, closeSync, type WriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./plan-utils.js";
 
 // ─── tree-kill (lazy-loaded) ────────────────────────────────────────────
 
@@ -106,8 +114,8 @@ interface UiContext {
 		setWidget(name: string, content: string[] | undefined): void;
 		setStatus(name: string, content: unknown): void;
 		theme: { fg(colour: string, text: string): string };
-		select(title: string, options: string[]): Promise<number | undefined>;
-		editor(title: string, content: string): Promise<void>;
+		select(title: string, options: string[]): Promise<string | undefined>;
+		editor(title: string, content: string): Promise<string | undefined>;
 	};
 }
 
@@ -308,6 +316,37 @@ export default function (pi: ExtensionAPI) {
 	let turnCount = 0;
 	let agentStartTime: number | undefined;
 	let agentTimer: ReturnType<typeof setInterval> | null = null;
+
+	// ── Plan-mode state ──────────────────────────────────────────────────
+
+	const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+	const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+	let planModeEnabled = false;
+	let planExecutionMode = false;
+	let planItems: TodoItem[] = [];
+
+	// ── Todo state ───────────────────────────────────────────────────────
+
+	interface Todo {
+		id: number;
+		text: string;
+		done: boolean;
+	}
+
+	interface TodoDetails {
+		action: "list" | "add" | "toggle" | "clear";
+		todos: Todo[];
+		nextId: number;
+		error?: string;
+	}
+
+	let todos: Todo[] = [];
+	let nextTodoId = 1;
+
+	// ── Tools-selector state ─────────────────────────────────────────────
+
+	let enabledTools: Set<string> = new Set();
+	let allTools: ToolInfo[] = [];
 
 	/** Currently running bash toolCallId (for Ctrl+B). */
 	let currentlyRunningToolCallId: string | null = null;
@@ -512,6 +551,105 @@ export default function (pi: ExtensionAPI) {
 		}, DEFAULT_TIMEOUT_MS);
 		timer.unref();
 		return timer;
+	}
+
+	// ── Plan-mode helpers ─────────────────────────────────────────────────
+
+	function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
+		return m.role === "assistant" && Array.isArray(m.content);
+	}
+
+	function getTextContent(message: AssistantMessage): string {
+		return message.content
+			.filter((block): block is TextContent => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+	}
+
+	function updatePlanStatus(ctx: ExtensionContext): void {
+		if (planExecutionMode && planItems.length > 0) {
+			const completed = planItems.filter((t) => t.completed).length;
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `\ud83d\udccb ${completed}/${planItems.length}`));
+		} else if (planModeEnabled) {
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "\u23f8 plan"));
+		} else {
+			ctx.ui.setStatus("plan-mode", undefined);
+		}
+
+		if (planExecutionMode && planItems.length > 0) {
+			const lines = planItems.map((item) => {
+				if (item.completed) {
+					return ctx.ui.theme.fg("success", "\u2611 ") + ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text));
+				}
+				return `${ctx.ui.theme.fg("muted", "\u2610 ")}${item.text}`;
+			});
+			ctx.ui.setWidget("plan-todos", lines);
+		} else {
+			ctx.ui.setWidget("plan-todos", undefined);
+		}
+	}
+
+	function togglePlanMode(ctx: ExtensionContext): void {
+		planModeEnabled = !planModeEnabled;
+		planExecutionMode = false;
+		planItems = [];
+
+		if (planModeEnabled) {
+			pi.setActiveTools(PLAN_MODE_TOOLS);
+			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+		} else {
+			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			ctx.ui.notify("Plan mode disabled. Full access restored.");
+		}
+		updatePlanStatus(ctx);
+	}
+
+	// ── Todo helpers ──────────────────────────────────────────────────────
+
+	function reconstructTodoState(ctx: ExtensionContext): void {
+		todos = [];
+		nextTodoId = 1;
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "message") continue;
+			const msg = entry.message;
+			if (msg.role !== "toolResult" || msg.toolName !== "todo") continue;
+			const details = msg.details as TodoDetails | undefined;
+			if (details) {
+				todos = details.todos;
+				nextTodoId = details.nextId;
+			}
+		}
+	}
+
+	// ── Tools-selector helpers ────────────────────────────────────────────
+
+	function persistToolsState(): void {
+		pi.appendEntry("tools-config", {
+			enabledTools: Array.from(enabledTools),
+		});
+	}
+
+	function applyToolsSelection(): void {
+		pi.setActiveTools(Array.from(enabledTools));
+	}
+
+	function restoreToolsFromBranch(ctx: ExtensionContext): void {
+		allTools = pi.getAllTools();
+		const branchEntries = ctx.sessionManager.getBranch();
+		let savedTools: string[] | undefined;
+		for (const entry of branchEntries) {
+			if (entry.type === "custom" && entry.customType === "tools-config") {
+				const data = entry.data as { enabledTools?: string[] } | undefined;
+				if (data?.enabledTools) savedTools = data.enabledTools;
+			}
+		}
+		if (savedTools) {
+			const allToolNames = allTools.map((t) => t.name);
+			enabledTools = new Set(savedTools.filter((t) => allToolNames.includes(t)));
+			applyToolsSelection();
+		} else {
+			enabledTools = new Set(pi.getActiveTools());
+		}
 	}
 
 	// ── Override bash tool ─────────────────────────────────────────────
@@ -949,12 +1087,23 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
-		if (!agentBackgrounded) return {};
+		// Agent backgrounding
+		if (agentBackgrounded) {
+			return { block: true, reason: "" };
+		}
 
-		return {
-			block: true,
-			reason: "",
-		};
+		// Plan-mode: block destructive bash commands
+		if (planModeEnabled && _event.toolName === "bash") {
+			const command = _event.input.command as string;
+			if (!isSafeCommand(command)) {
+				return {
+					block: true,
+					reason: `Plan mode: command blocked (not allowlisted). Use /plan to disable plan mode first.\nCommand: ${command}`,
+				};
+			}
+		}
+
+		return {};
 	});
 
 	// Background hint: after 2s of agent activity, show the shortcut.
@@ -968,11 +1117,93 @@ export default function (pi: ExtensionAPI) {
 		backgroundHintTimer.unref();
 	});
 
-	pi.on("turn_end", async () => {
-		if (backgroundHintTimer) { clearTimeout(backgroundHintTimer); backgroundHintTimer = undefined; }
+	pi.on("turn_end", async (event, ctx) => {
+		// Plan-mode progress tracking
+		if (planExecutionMode && planItems.length > 0) {
+			if (isAssistantMessage(event.message)) {
+				const text = getTextContent(event.message);
+				if (markCompletedSteps(text, planItems) > 0) {
+					updatePlanStatus(ctx);
+				}
+			}
+		}
 	});
 
-	// ── Commands ───────────────────────────────────────────────────────
+	// Plan-mode: inject context before agent starts
+	pi.on("before_agent_start", async () => {
+		if (planModeEnabled) {
+			return {
+				message: {
+					customType: "plan-mode-context",
+					content: `[PLAN MODE ACTIVE]
+You are in plan mode - a read-only exploration mode for safe code analysis.
+
+Restrictions:
+- You can only use: read, bash, grep, find, ls, questionnaire
+- You CANNOT use: edit, write (file modifications are disabled)
+- Bash is restricted to an allowlist of read-only commands
+
+Ask clarifying questions using the questionnaire tool.
+
+Create a detailed numbered plan under a "Plan:" header:
+
+Plan:
+1. First step description
+2. Second step description
+...
+
+Do NOT attempt to make changes - just describe what you would do.`,
+					display: false,
+				},
+			};
+		}
+
+		if (planExecutionMode && planItems.length > 0) {
+			const remaining = planItems.filter((t) => !t.completed);
+			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			return {
+				message: {
+					customType: "plan-execution-context",
+					content: `[EXECUTING PLAN - Full tool access enabled]
+
+Remaining steps:
+${todoList}
+
+Execute each step in order.
+After completing a step, include a [DONE:n] tag in your response.`,
+					display: false,
+				},
+			};
+		}
+	});
+
+	// Plan-mode: filter out stale context when not active
+	pi.on("context", async (event) => {
+		if (planModeEnabled) return;
+
+		return {
+			messages: event.messages.filter((m) => {
+				const msg = m as AgentMessage & { customType?: string };
+				if (msg.customType === "plan-mode-context") return false;
+				if (msg.role !== "user") return true;
+
+				const content = msg.content;
+				if (typeof content === "string") return !content.includes("[PLAN MODE ACTIVE]");
+				if (Array.isArray(content)) {
+					return !content.some(
+						(c) => c.type === "text" && (c as TextContent).text?.includes("[PLAN MODE ACTIVE]"),
+					);
+				}
+				return true;
+			}),
+		};
+	});
+
+	// Plan-mode: restore state on branch navigation
+	pi.on("session_tree", async (_event, ctx) => {
+		reconstructTodoState(ctx);
+		restoreToolsFromBranch(ctx);
+	});
 
 	pi.registerCommand("bg", {
 		description: "Background bash/agent, or resume backgrounded agent",
@@ -1061,7 +1292,7 @@ export default function (pi: ExtensionAPI) {
 			);
 			if (action === undefined) return;
 
-			if (action === 0) {
+			if (action === actions[0]) {
 				// Attach \u2014 wait for completion then post output
 				ctx.ui.setStatus("bg-fg", `Attaching to ${job.id}...`);
 				if (!job.donePromise) createJobDonePromise(job);
@@ -1084,7 +1315,7 @@ export default function (pi: ExtensionAPI) {
 					triggerTurn: false,
 				});
 				ctx.ui.notify(`Attached ${job.id}`, "info");
-			} else if (action === 1) {
+			} else if (action === actions[1]) {
 				// Show Output
 				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
 				await ctx.ui.editor(
@@ -1093,7 +1324,7 @@ export default function (pi: ExtensionAPI) {
 					`PID: ${job.pid} \u00b7 Started: ${new Date(job.startTime).toLocaleString()}\n` +
 					`Duration: ${duration} \u00b7 Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`,
 				);
-			} else if (action === 2) {
+			} else if (action === actions[2]) {
 				// Kill
 				if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
 				markJobTerminal(job, "killed");
@@ -1109,7 +1340,7 @@ export default function (pi: ExtensionAPI) {
 			);
 			if (action === undefined) return;
 
-			if (action === 0) {
+			if (action === actions[0]) {
 				const output = await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
 				await ctx.ui.editor(
 					`${statusIcon} ${job.id}: ${job.command.slice(0, 50)}`,
@@ -1118,7 +1349,7 @@ export default function (pi: ExtensionAPI) {
 					`Status: ${job.status} \u00b7 Exit code: ${job.exitCode ?? "n/a"}\n` +
 					`Duration: ${duration} \u00b7 Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`,
 				);
-			} else if (action === 1) {
+			} else if (action === actions[1]) {
 				backgroundJobs.delete(job.id);
 				ctx.ui.notify(`Removed ${job.id}`, "info");
 				updateWidget(ctx);
@@ -1157,19 +1388,286 @@ export default function (pi: ExtensionAPI) {
 		if (choice === undefined) return;
 
 		// Agent backgrounded entry
-		if (agentBackgrounded && choice === 0 && items[0].includes("agent")) {
+		if (agentBackgrounded && choice === items[0]) {
 			await handleBackgroundShortcut(ctx);
 			return;
 		}
 
-		// Find the job \u2014 skip the agent entry if present.
-		const jobOffset = agentBackgrounded ? 1 : 0;
-		const jobIndex = choice - jobOffset;
-		const jobList = [...runningJobs, ...finishedJobs];
-		if (jobIndex >= 0 && jobIndex < jobList.length) {
-			await showTaskDetail(jobList[jobIndex], ctx);
+		// Find the job from the selected text.
+		const selectedJob = [...runningJobs, ...finishedJobs].find(j =>
+			choice?.includes(j.id),
+		);
+		if (selectedJob) {
+			await showTaskDetail(selectedJob, ctx);
 		}
 	}
+
+	// ── Todo tool (for the LLM) ──────────────────────────────────────────
+
+	const TodoParams = Type.Object({
+		action: StringEnum(["list", "add", "toggle", "clear"] as const),
+		text: Type.Optional(Type.String({ description: "Todo text (for add)" })),
+		id: Type.Optional(Type.Number({ description: "Todo ID (for toggle)" })),
+	});
+
+	pi.registerTool({
+		name: "todo",
+		label: "Todo",
+		description: "Manage a todo list. Actions: list, add (text), toggle (id), clear",
+		parameters: TodoParams,
+
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			switch (params.action) {
+				case "list":
+					return {
+						content: [{
+							type: "text",
+							text: todos.length
+								? todos.map((t) => `[${t.done ? "x" : " "}] #${t.id}: ${t.text}`).join("\n")
+								: "No todos",
+						}],
+						details: { action: "list", todos: [...todos], nextId: nextTodoId } as TodoDetails,
+					};
+
+				case "add": {
+					if (!params.text) {
+						return {
+							content: [{ type: "text", text: "Error: text required for add" }],
+							details: { action: "add", todos: [...todos], nextId: nextTodoId, error: "text required" } as TodoDetails,
+						};
+					}
+					const newTodo: Todo = { id: nextTodoId++, text: params.text, done: false };
+					todos.push(newTodo);
+					return {
+						content: [{ type: "text", text: `Added todo #${newTodo.id}: ${newTodo.text}` }],
+						details: { action: "add", todos: [...todos], nextId: nextTodoId } as TodoDetails,
+					};
+				}
+
+				case "toggle": {
+					if (params.id === undefined) {
+						return {
+							content: [{ type: "text", text: "Error: id required for toggle" }],
+							details: { action: "toggle", todos: [...todos], nextId: nextTodoId, error: "id required" } as TodoDetails,
+						};
+					}
+					const todo = todos.find((t) => t.id === params.id);
+					if (!todo) {
+						return {
+							content: [{ type: "text", text: `Todo #${params.id} not found` }],
+							details: { action: "toggle", todos: [...todos], nextId: nextTodoId, error: `#${params.id} not found` } as TodoDetails,
+						};
+					}
+					todo.done = !todo.done;
+					return {
+						content: [{ type: "text", text: `Todo #${todo.id} ${todo.done ? "completed" : "uncompleted"}` }],
+						details: { action: "toggle", todos: [...todos], nextId: nextTodoId } as TodoDetails,
+					};
+				}
+
+				case "clear": {
+					const count = todos.length;
+					todos = [];
+					nextTodoId = 1;
+					return {
+						content: [{ type: "text", text: `Cleared ${count} todos` }],
+						details: { action: "clear", todos: [], nextId: 1 } as TodoDetails,
+					};
+				}
+
+				default:
+					return {
+						content: [{ type: "text", text: `Unknown action: ${params.action}` }],
+						details: { action: "list", todos: [...todos], nextId: nextTodoId, error: `unknown action: ${params.action}` } as TodoDetails,
+					};
+			}
+		},
+
+		renderCall(args, theme) {
+			let text = theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", args.action);
+			if (args.text) text += ` ${theme.fg("dim", `"${args.text}"`)}`;
+			if (args.id !== undefined) text += ` ${theme.fg("accent", `#${args.id}`)}`;
+			return new Text(text, 0, 0);
+		},
+
+		renderResult(result, { expanded }, theme) {
+			const details = result.details as TodoDetails | undefined;
+			if (!details) {
+				const text = result.content[0];
+				return new Text(text?.type === "text" ? text.text : "", 0, 0);
+			}
+			if (details.error) return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
+
+			switch (details.action) {
+				case "list": {
+					const todoList = details.todos;
+					if (todoList.length === 0) return new Text(theme.fg("dim", "No todos"), 0, 0);
+					let listText = theme.fg("muted", `${todoList.length} todo(s):`);
+					const display = expanded ? todoList : todoList.slice(0, 5);
+					for (const t of display) {
+						const check = t.done ? theme.fg("success", "\u2713") : theme.fg("dim", "\u25cb");
+						const itemText = t.done ? theme.fg("dim", t.text) : theme.fg("muted", t.text);
+						listText += `\n${check} ${theme.fg("accent", `#${t.id}`)} ${itemText}`;
+					}
+					if (!expanded && todoList.length > 5) {
+						listText += `\n${theme.fg("dim", `... ${todoList.length - 5} more`)}`;
+					}
+					return new Text(listText, 0, 0);
+				}
+				case "add": {
+					const added = details.todos[details.todos.length - 1];
+					return new Text(theme.fg("success", "\u2713 Added ") + theme.fg("accent", `#${added.id}`) + " " + theme.fg("muted", added.text), 0, 0);
+				}
+				case "toggle": {
+					const text = result.content[0];
+					const msg = text?.type === "text" ? text.text : "";
+					return new Text(theme.fg("success", "\u2713 ") + theme.fg("muted", msg), 0, 0);
+				}
+				case "clear":
+					return new Text(theme.fg("success", "\u2713 ") + theme.fg("muted", "Cleared all todos"), 0, 0);
+			}
+		},
+	});
+
+	// ── /todos command (for the user) ────────────────────────────────────
+
+	class TodoListComponent {
+		private list: Todo[];
+		private theme: { fg(colour: string, text: string): string; bold(text: string): string; strikethrough(text: string): string };
+		private onClose: () => void;
+		private cachedWidth?: number;
+		private cachedLines?: string[];
+
+		constructor(todos: Todo[], theme: { fg(colour: string, text: string): string; bold(text: string): string; strikethrough(text: string): string }, onClose: () => void) {
+			this.list = todos;
+			this.theme = theme;
+			this.onClose = onClose;
+		}
+
+		handleInput(data: string): void {
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) this.onClose();
+		}
+
+		render(width: number): string[] {
+			if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
+
+			const lines: string[] = [];
+			const th = this.theme;
+
+			lines.push("");
+			const title = th.fg("accent", " Todos ");
+			const headerLine = th.fg("borderMuted", "\u2500".repeat(3)) + title + th.fg("borderMuted", "\u2500".repeat(Math.max(0, width - 10)));
+			lines.push(truncateToWidth(headerLine, width));
+			lines.push("");
+
+			if (this.list.length === 0) {
+				lines.push(truncateToWidth(`  ${th.fg("dim", "No todos yet. Ask the agent to add some!")}`, width));
+			} else {
+				const done = this.list.filter((t) => t.done).length;
+				const total = this.list.length;
+				lines.push(truncateToWidth(`  ${th.fg("muted", `${done}/${total} completed`)}`, width));
+			lines.push("");
+
+				for (const todo of this.list) {
+					const check = todo.done ? th.fg("success", "\u2713") : th.fg("dim", "\u25cb");
+					const id = th.fg("accent", `#${todo.id}`);
+					const text = todo.done ? th.fg("dim", todo.text) : th.fg("text", todo.text);
+					lines.push(truncateToWidth(`  ${check} ${id} ${text}`, width));
+				}
+			}
+
+			lines.push("");
+			lines.push(truncateToWidth(`  ${th.fg("dim", "Press Escape to close")}`, width));
+			lines.push("");
+
+			this.cachedWidth = width;
+			this.cachedLines = lines;
+			return lines;
+		}
+
+		invalidate(): void {
+			this.cachedWidth = undefined;
+			this.cachedLines = undefined;
+		}
+	}
+
+	pi.registerCommand("todos", {
+		description: "Show all todos on the current branch",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("/todos requires interactive mode", "error");
+				return;
+			}
+			await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
+				return new TodoListComponent(todos, theme, () => done());
+			});
+		},
+	});
+
+	// ── /tools command ───────────────────────────────────────────────────
+
+	pi.registerCommand("tools", {
+		description: "Enable/disable tools",
+		handler: async (_args, ctx) => {
+			allTools = pi.getAllTools();
+
+			await ctx.ui.custom((_tui, theme, _kb, done) => {
+				const items: SettingItem[] = allTools.map((tool) => ({
+					id: tool.name,
+					label: tool.name,
+					currentValue: enabledTools.has(tool.name) ? "enabled" : "disabled",
+					values: ["enabled", "disabled"],
+				}));
+
+				const container = new Container();
+				container.addChild(new (class {
+					render(_width: number) {
+						return [theme.fg("accent", theme.bold("Tool Configuration")), ""];
+					}
+					invalidate() {}
+				})());
+
+				const settingsList = new SettingsList(
+					items,
+				Math.min(items.length + 2, 15),
+					getSettingsListTheme(),
+					(id, newValue) => {
+						if (newValue === "enabled") enabledTools.add(id);
+						else enabledTools.delete(id);
+						applyToolsSelection();
+						persistToolsState();
+					},
+					() => done(undefined),
+				);
+
+					container.addChild(settingsList);
+
+				return {
+					render(width: number) { return container.render(width); },
+					invalidate() { container.invalidate(); },
+					handleInput(data: string) { settingsList.handleInput?.(data); },
+				};
+			});
+		},
+	});
+
+	// ── Plan mode ────────────────────────────────────────────────────────
+
+	pi.registerFlag("plan", {
+		description: "Start in plan mode (read-only exploration)",
+		type: "boolean",
+		default: false,
+	});
+
+	pi.registerCommand("plan", {
+		description: "Toggle plan mode (read-only exploration)",
+		handler: async (_args, ctx) => togglePlanMode(ctx),
+	});
+
+	pi.registerShortcut(Key.ctrlAlt("p"), {
+		description: "Toggle plan mode",
+		handler: async (ctx) => togglePlanMode(ctx),
+	});
 
 	// ── Lifecycle events ───────────────────────────────────────────────
 
@@ -1177,7 +1675,7 @@ export default function (pi: ExtensionAPI) {
 		// Status line: ready indicator
 		ctx.ui.setStatus("tau-turn", ctx.ui.theme.fg("dim", "Ready"));
 
-		// Restore persisted state
+		// Restore background-tasks state
 		const entries = ctx.sessionManager.getEntries();
 		for (const entry of entries) {
 			if (entry.type === "custom" && entry.customType === "background-tasks-state") {
@@ -1198,6 +1696,50 @@ export default function (pi: ExtensionAPI) {
 				break;
 			}
 		}
+
+		// Restore plan-mode state
+		if (pi.getFlag("plan") === true) {
+			planModeEnabled = true;
+		}
+
+		const planModeEntry = entries
+			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plan-mode")
+			.pop() as { data?: { enabled: boolean; todos?: TodoItem[]; executing?: boolean } } | undefined;
+
+		if (planModeEntry?.data) {
+			planModeEnabled = planModeEntry.data.enabled ?? planModeEnabled;
+			planItems = planModeEntry.data.todos ?? planItems;
+			planExecutionMode = planModeEntry.data.executing ?? planExecutionMode;
+		}
+
+		// On resume: re-scan messages to rebuild plan completion state
+		if (planModeEntry !== undefined && planExecutionMode && planItems.length > 0) {
+			let executeIndex = -1;
+			for (let i = entries.length - 1; i >= 0; i--) {
+				const entry = entries[i] as { type: string; customType?: string };
+				if (entry.customType === "plan-mode-execute") { executeIndex = i; break; }
+			}
+			const messages: AssistantMessage[] = [];
+			for (let i = executeIndex + 1; i < entries.length; i++) {
+				const entry = entries[i];
+				if (entry.type === "message" && "message" in entry && isAssistantMessage(entry.message as AgentMessage)) {
+					messages.push(entry.message as AssistantMessage);
+				}
+			}
+			const allText = messages.map(getTextContent).join("\n");
+			markCompletedSteps(allText, planItems);
+		}
+
+		if (planModeEnabled) {
+			pi.setActiveTools(PLAN_MODE_TOOLS);
+		}
+		updatePlanStatus(ctx);
+
+		// Restore todo state
+		reconstructTodoState(ctx);
+
+		// Restore tools-selector state
+		restoreToolsFromBranch(ctx);
 	});
 
 	// ── Notifications ────────────────────────────────────────────────────
@@ -1211,7 +1753,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	/** Extract the last assistant text from the message history. */
-	function lastAssistantText(messages: Array<{ role: string; content?: Array<{ type: string; text?: string }> }>): string | undefined {
+	function lastAssistantText(messages: Array<{ role: string; content?: string | Array<{ type: string; text?: string }> }>): string | undefined {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const msg = messages[i];
 			if (msg.role === "assistant" && Array.isArray(msg.content)) {
@@ -1237,6 +1779,64 @@ export default function (pi: ExtensionAPI) {
 			agentStartTime = undefined;
 		}
 
+		// ── Plan-mode: completion detection ──────────────────────────────
+		if (planExecutionMode && planItems.length > 0) {
+			if (planItems.every((t) => t.completed)) {
+				const completedList = planItems.map((t) => `~~${t.text}~~`).join("\n");
+				pi.sendMessage(
+					{ customType: "plan-complete", content: `**Plan Complete!** \u2713\n\n${completedList}`, display: true },
+					{ triggerTurn: false },
+				);
+				planExecutionMode = false;
+				planItems = [];
+				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				updatePlanStatus(ctx);
+				pi.appendEntry("plan-mode", { enabled: false, todos: [], executing: false });
+			} else {
+				pi.appendEntry("plan-mode", { enabled: planModeEnabled, todos: planItems, executing: planExecutionMode });
+			}
+		} else if (planModeEnabled && ctx.hasUI) {
+			// Extract plan steps from last assistant message
+			const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
+			if (lastAssistant) {
+				const extracted = extractTodoItems(getTextContent(lastAssistant));
+				if (extracted.length > 0) planItems = extracted;
+			}
+
+			if (planItems.length > 0) {
+				const todoListText = planItems.map((t, i) => `${i + 1}. \u2610 ${t.text}`).join("\n");
+				pi.sendMessage(
+					{ customType: "plan-todo-list", content: `**Plan Steps (${planItems.length}):**\n\n${todoListText}`, display: true },
+					{ triggerTurn: false },
+				);
+			}
+
+			const choice = await ctx.ui.select("Plan mode - what next?", [
+				planItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
+				"Stay in plan mode",
+				"Refine the plan",
+			]);
+
+			if (choice?.startsWith("Execute")) {
+				planModeEnabled = false;
+				planExecutionMode = planItems.length > 0;
+				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				updatePlanStatus(ctx);
+
+				const execMessage = planItems.length > 0
+					? `Execute the plan. Start with: ${planItems[0].text}`
+					: "Execute the plan you just created.";
+				pi.sendMessage(
+					{ customType: "plan-mode-execute", content: execMessage, display: true },
+					{ triggerTurn: true },
+				);
+			} else if (choice === "Refine the plan") {
+				const refinement = await ctx.ui.editor("Refine the plan:", "");
+				if (refinement?.trim()) pi.sendUserMessage(refinement.trim());
+			}
+		}
+
+		// ── Notification ────────────────────────────────────────────────
 		const body = lastAssistantText(event.messages);
 		const notificationBody = body ? truncateNotificationBody(body) : "Ready for input";
 		notify("Pi", notificationBody);
