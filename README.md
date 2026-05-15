@@ -1,8 +1,10 @@
-# Tau (τ) — Background Tasks Extension for pi
+# Tau (τ) — Quality-of-Life Extension for pi
 
-Claude Code-style task backgrounding. One shortcut does everything: **Ctrl+B**.
+Background tasks, notifications, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
 
 ## Features
+
+### Background Tasks
 
 - **Ctrl+B** — background running bash, background the agent loop, or resume a backgrounded agent
 - **15-second auto-background** — long-running commands are automatically backgrounded with agent confirmation
@@ -15,9 +17,14 @@ Claude Code-style task backgrounding. One shortcut does everything: **Ctrl+B**.
 - **Pill bar** — `◐ job-1: cmd (12s) · ◐ agent (backgrounded)` in the status area
 - **Task management UI** — Shift+↓ or Ctrl+J opens grouped task list with detail views
 - **Ctrl+X** — kill most recent running background task
-- **Native notifications** — OSC 777/99 (macOS/Linux) or Windows toast on agent completion, showing the last assistant message
 - **Session persistence** — job history survives pi restarts
 - **Zero runtime dependencies** — tree-kill replaced with `process.kill(-pid)`
+
+### Notifications
+
+- **Native terminal notifications** on agent completion — OSC 777 (Ghostty, iTerm2, WezTerm), OSC 99 (Kitty), Windows toast
+- **Last agent message** shown in the notification body (first line, max 200 chars)
+- **Replaces the standalone `notify.ts` extension**
 
 ## Installation
 
