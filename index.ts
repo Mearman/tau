@@ -22,6 +22,7 @@ import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, statSync, existsSync, openSync, readSync, closeSync, type WriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 
 // ─── tree-kill (lazy-loaded) ────────────────────────────────────────────
@@ -314,6 +315,36 @@ export default function (pi: ExtensionAPI) {
 
 	/** Timer for the background hint shown after 2s of agent activity. */
 	let backgroundHintTimer: NodeJS.Timeout | undefined;
+
+	// ── Titlebar spinner ────────────────────────────────────────────────
+
+	const BRAILLE_FRAMES = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
+	let titlebarTimer: ReturnType<typeof setInterval> | null = null;
+	let titlebarFrameIndex = 0;
+
+	function getTitleBase(): string {
+		const cwd = path.basename(process.cwd());
+		const session = pi.getSessionName();
+		return session ? `\u03c0 - ${session} - ${cwd}` : `\u03c0 - ${cwd}`;
+	}
+
+	function startTitlebarSpinner(ctx: { ui: { setTitle(title: string): void } }): void {
+		stopTitlebarSpinner(ctx);
+		titlebarTimer = setInterval(() => {
+			const frame = BRAILLE_FRAMES[titlebarFrameIndex % BRAILLE_FRAMES.length];
+			ctx.ui.setTitle(`${frame} ${getTitleBase()}`);
+			titlebarFrameIndex++;
+		}, 80);
+	}
+
+	function stopTitlebarSpinner(ctx: { ui: { setTitle(title: string): void } }): void {
+		if (titlebarTimer) {
+			clearInterval(titlebarTimer);
+			titlebarTimer = null;
+		}
+		titlebarFrameIndex = 0;
+		ctx.ui.setTitle(getTitleBase());
+	}
 
 	// ── Widget / status bar ────────────────────────────────────────────
 
@@ -901,6 +932,10 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Agent backgrounding ─────────────────────────────────────────────
 
+	pi.on("agent_start", async (_event, ctx) => {
+		startTitlebarSpinner(ctx);
+	});
+
 	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
 		if (!agentBackgrounded) return {};
 
@@ -1174,13 +1209,17 @@ export default function (pi: ExtensionAPI) {
 		return undefined;
 	}
 
-	pi.on("agent_end", async (event) => {
+	pi.on("agent_end", async (event, ctx) => {
+		stopTitlebarSpinner(ctx);
+
 		const body = lastAssistantText(event.messages);
 		const notificationBody = body ? truncateNotificationBody(body) : "Ready for input";
 		notify("Pi", notificationBody);
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
+		stopTitlebarSpinner(ctx);
+
 		// Kill all running background jobs
 		for (const job of backgroundJobs.values()) {
 			if (job.proc && job.status === "running") {
