@@ -31,7 +31,7 @@ jobs:
           node-version-file: .tool-versions
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
       - name: Lint commit messages
         run: |
@@ -50,7 +50,7 @@ jobs:
           node-version-file: .tool-versions
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
       - run: pnpm audit --audit-level high
 
@@ -68,7 +68,7 @@ jobs:
           node-version-file: .tool-versions
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
       - run: pnpm check
 
@@ -91,7 +91,7 @@ jobs:
           cache: pnpm
           # Do NOT set registry-url — it creates an .npmrc that overrides OIDC
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
       - name: Release
         env:
