@@ -823,6 +823,11 @@ export default function (pi: ExtensionAPI) {
 		handler: handleBackgroundShortcut,
 	});
 
+	pi.registerShortcut("ctrl+b", {
+		description: "Background current bash process",
+		handler: handleBackgroundShortcut,
+	});
+
 	pi.registerShortcut("ctrl+j", {
 		description: "Open background jobs interface",
 		handler: async (ctx) => {
