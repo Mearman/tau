@@ -14,12 +14,12 @@
  * - Native terminal notification on agent_end (OSC 777/99, Windows toast)
  *
  * Tools: bash (overridden), bash_bg, jobs
- * Commands: /bg, /fg, /jobs
- * Shortcuts: Ctrl+Shift+B, Ctrl+J
+ * Commands: /bg, /fg, /jobs, /suspend, /resume
+ * Shortcuts: Ctrl+Shift+B (background/suspend), Ctrl+B (background/suspend), Ctrl+R (resume), Ctrl+J (jobs)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashTool, type BashToolDetails } from "@earendil-works/pi-coding-agent";
+import { createBashTool, type BashToolDetails, type ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, statSync, existsSync, openSync, readSync, closeSync, type WriteStream } from "node:fs";
@@ -308,6 +308,10 @@ export default function (pi: ExtensionAPI) {
 
 	/** Currently running bash toolCallId (for Ctrl+Shift+B) */
 	let currentlyRunningToolCallId: string | null = null;
+
+	/** Agent suspension state. When true, tool_call events are blocked and the
+	 *  agent is told to stop. /resume or Ctrl+R clears the flag and continues. */
+	let agentSuspended = false;
 
 	// ── Widget / status bar ────────────────────────────────────────────
 
@@ -804,27 +808,33 @@ export default function (pi: ExtensionAPI) {
 	// ── Keyboard shortcuts ─────────────────────────────────────────────
 
 	async function handleBackgroundShortcut(ctx: UiContext): Promise<void> {
-		if (!currentlyRunningToolCallId) {
-			ctx.ui.notify("No running bash process to background", "warning");
+		// If a bash process is running, background it.
+		if (currentlyRunningToolCallId) {
+			const rp = runningProcesses.get(currentlyRunningToolCallId);
+			if (rp && !rp.backgrounded) {
+				backgroundProcess(rp, ctx);
+				return;
+			}
+		}
+
+		// Otherwise, suspend the agent loop.
+		if (agentSuspended) {
+			ctx.ui.notify("Agent already suspended", "warning");
 			return;
 		}
 
-		const rp = runningProcesses.get(currentlyRunningToolCallId);
-		if (!rp || rp.backgrounded) {
-			ctx.ui.notify("No active process to background", "warning");
-			return;
-		}
-
-		backgroundProcess(rp, ctx);
+		agentSuspended = true;
+		ctx.ui.notify("\u23f8 Agent suspended. Press Ctrl+R or /resume to continue.", "info");
+		ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
 	}
 
 	pi.registerShortcut("ctrl+shift+b", {
-		description: "Background current bash process",
+		description: "Background bash process or suspend agent loop",
 		handler: handleBackgroundShortcut,
 	});
 
 	pi.registerShortcut("ctrl+b", {
-		description: "Background current bash process",
+		description: "Background bash process or suspend agent loop",
 		handler: handleBackgroundShortcut,
 	});
 
@@ -835,23 +845,61 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	// ── Agent suspension ───────────────────────────────────────────────
+
+	pi.on("tool_call", async (_event): Promise<ToolCallEventResult> => {
+		if (!agentSuspended) return {};
+
+		return {
+			block: true,
+			reason: "Agent suspended by user. Stop processing and wait for /resume.",
+		};
+	});
+
+	pi.registerShortcut("ctrl+r", {
+		description: "Resume suspended agent",
+		handler: async (ctx) => {
+			if (!agentSuspended) {
+				ctx.ui.notify("Agent is not suspended", "info");
+				return;
+			}
+
+			agentSuspended = false;
+			ctx.ui.setStatus("agent-suspended", undefined);
+			ctx.ui.notify("\u25b6 Agent resumed", "success");
+
+			pi.sendMessage({
+				customType: "agent-resume",
+				content: "The user has resumed the agent. Continue where you left off.",
+				display: true,
+			}, {
+				deliverAs: "followUp",
+				triggerTurn: true,
+			});
+		},
+	});
+
 	// ── Commands ───────────────────────────────────────────────────────
 
 	pi.registerCommand("bg", {
-		description: "Background the currently running bash process",
+		description: "Background bash process or suspend agent loop",
 		handler: async (_args, ctx) => {
-			if (!currentlyRunningToolCallId) {
-				ctx.ui.notify("No running bash process to background", "warning");
+			if (currentlyRunningToolCallId) {
+				const rp = runningProcesses.get(currentlyRunningToolCallId);
+				if (rp && !rp.backgrounded) {
+					backgroundProcess(rp, ctx);
+					return;
+				}
+			}
+
+			if (agentSuspended) {
+				ctx.ui.notify("Agent already suspended", "warning");
 				return;
 			}
 
-			const rp = runningProcesses.get(currentlyRunningToolCallId);
-			if (!rp || rp.backgrounded) {
-				ctx.ui.notify("No active process to background", "warning");
-				return;
-			}
-
-			backgroundProcess(rp, ctx);
+			agentSuspended = true;
+			ctx.ui.notify("\u23f8 Agent suspended. Use /resume or Ctrl+R to continue.", "info");
+			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
 		},
 	});
 
@@ -913,6 +961,41 @@ export default function (pi: ExtensionAPI) {
 		description: "Show and manage background jobs interactively",
 		handler: async (_args, ctx) => {
 			await showJobsInterface(ctx);
+		},
+	});
+
+	pi.registerCommand("suspend", {
+		description: "Suspend the agent loop (block further tool calls)",
+		handler: async (_args, ctx) => {
+			if (agentSuspended) {
+				ctx.ui.notify("Agent already suspended", "warning");
+				return;
+			}
+			agentSuspended = true;
+			ctx.ui.notify("\u23f8 Agent suspended. Use /resume or Ctrl+R to continue.", "info");
+			ctx.ui.setStatus("agent-suspended", ctx.ui.theme.fg("warning", "\u23f8 Suspended"));
+		},
+	});
+
+	pi.registerCommand("resume", {
+		description: "Resume the suspended agent loop",
+		handler: async (_args, ctx) => {
+			if (!agentSuspended) {
+				ctx.ui.notify("Agent is not suspended", "info");
+				return;
+			}
+			agentSuspended = false;
+			ctx.ui.setStatus("agent-suspended", undefined);
+			ctx.ui.notify("\u25b6 Agent resumed", "success");
+
+			pi.sendMessage({
+				customType: "agent-resume",
+				content: "The user has resumed the agent. Continue where you left off.",
+				display: true,
+			}, {
+				deliverAs: "followUp",
+				triggerTurn: true,
+			});
 		},
 	});
 
