@@ -98,7 +98,7 @@ function windowsToastScript(title: string, body: string): string {
     ].join("; ");
 }
 
-function notify(title: string, body: string): void {
+function notify(title: string, body: string, persistent?: boolean): void {
     if (process.env.WT_SESSION) {
         execFile("powershell.exe", [
             "-NoProfile",
@@ -106,7 +106,8 @@ function notify(title: string, body: string): void {
             windowsToastScript(title, body),
         ]);
     } else if (process.env.KITTY_WINDOW_ID) {
-        process.stdout.write(`\x1b]99;i=1:d=0;${title}\x1b\\`);
+        const urgency = persistent ? "1" : "0";
+        process.stdout.write(`\x1b]99;i=1:d=${urgency};${title}\x1b\\`);
         process.stdout.write(`\x1b]99;i=1:p=body;${body}\x1b\\`);
     } else {
         process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
@@ -386,6 +387,11 @@ export default function (pi: ExtensionAPI) {
     let planModeEnabled = false;
     let planExecutionMode = false;
     let planItems: TodoItem[] = [];
+
+    // ── Notification config ──────────────────────────────────────────────
+
+    let notificationEnabled = true;
+    let notificationPersistent = false;
 
     // ── Todo state ───────────────────────────────────────────────────────
 
@@ -2272,6 +2278,84 @@ After completing a step, include a [DONE:n] tag in your response.`,
         },
     });
 
+    // ── Notification settings ───────────────────────────────────────────
+
+    pi.registerCommand("notifications", {
+        description: "Configure notifications (DnD / persistence)",
+        handler: async (_args, ctx) => {
+            await ctx.ui.custom((_tui, theme, _kb, done) => {
+                const items: SettingItem[] = [
+                    {
+                        id: "notifications-enabled",
+                        label: "Enable notifications",
+                        currentValue: notificationEnabled
+                            ? "enabled"
+                            : "disabled",
+                        values: ["enabled", "disabled"],
+                    },
+                    {
+                        id: "notifications-persistent",
+                        label: "Persistent (stay until dismissed)",
+                        currentValue: notificationPersistent
+                            ? "persistent"
+                            : "auto",
+                        values: ["persistent", "auto"],
+                    },
+                ];
+
+                const container = new Container();
+                container.addChild(
+                    new (class {
+                        render(_width: number) {
+                            return [
+                                theme.fg(
+                                    "accent",
+                                    theme.bold("Notification Settings")
+                                ),
+                                "",
+                            ];
+                        }
+                        invalidate() {}
+                    })()
+                );
+
+                const settingsList = new SettingsList(
+                    items,
+                    Math.min(items.length + 2, 15),
+                    getSettingsListTheme(),
+                    (id, newValue) => {
+                        if (id === "notifications-enabled") {
+                            notificationEnabled = newValue === "enabled";
+                        } else if (id === "notifications-persistent") {
+                            notificationPersistent = newValue === "persistent";
+                        }
+                        pi.appendEntry("notifications-config", {
+                            enabled: notificationEnabled,
+                            persistent: notificationPersistent,
+                        });
+                    },
+                    () => {
+                        done(undefined);
+                    }
+                );
+
+                container.addChild(settingsList);
+
+                return {
+                    render(width: number) {
+                        return container.render(width);
+                    },
+                    invalidate() {
+                        container.invalidate();
+                    },
+                    handleInput(data: string) {
+                        settingsList.handleInput?.(data);
+                    },
+                };
+            });
+        },
+    });
+
     // ── Plan mode ────────────────────────────────────────────────────────
 
     pi.registerFlag("plan", {
@@ -2400,6 +2484,23 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
         // Restore tools-selector state
         restoreToolsFromBranch(ctx);
+
+        // Restore notification config
+        for (const entry of ctx.sessionManager.getBranch()) {
+            if (
+                entry.type === "custom" &&
+                entry.customType === "notifications-config"
+            ) {
+                const data = entry.data as
+                    | { enabled?: boolean; persistent?: boolean }
+                    | undefined;
+                if (data) {
+                    notificationEnabled = data.enabled ?? true;
+                    notificationPersistent = data.persistent ?? false;
+                }
+                break;
+            }
+        }
     });
 
     // ── Notifications ────────────────────────────────────────────────────
@@ -2528,11 +2629,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
         }
 
         // ── Notification ────────────────────────────────────────────────
-        const body = lastAssistantText(event.messages);
-        const notificationBody = body
-            ? truncateNotificationBody(body)
-            : "Ready for input";
-        notify("Pi", notificationBody);
+        if (notificationEnabled) {
+            const body = lastAssistantText(event.messages);
+            const notificationBody = body
+                ? truncateNotificationBody(body)
+                : "Ready for input";
+            notify("Pi", notificationBody, notificationPersistent);
+        }
     });
 
     pi.on("session_shutdown", async (_event, ctx) => {
