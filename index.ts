@@ -687,8 +687,11 @@ export default function (pi: ExtensionAPI) {
                         `Command: ${rp.command}\n` +
                         `PID: ${job.pid}\n` +
                         `Output so far: ${job.logPath}\n\n` +
-                        `You must decide what to do. Use the job_decide tool with jobId "${job.id}" and your decision.\n` +
-                        `You may inspect the output first using the jobs tool with action "output" and jobId "${job.id}".`,
+                        `Use the job_decide tool with jobId "${job.id}" to decide:\n` +
+                        `- decision "check": inspect the output first\n` +
+                        `- decision "keep": let it continue running\n` +
+                        `- decision "kill": terminate it\n\n` +
+                        `Do NOT use jobs action "attach" on this job — it will block indefinitely.`,
                     display: true,
                     details: {
                         jobId: job.id,
@@ -1244,8 +1247,17 @@ export default function (pi: ExtensionAPI) {
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
 
                     const waitForCompletion = params.wait ?? true;
+                    // Don't block on the pending-decision job — the agent needs
+                    // to decide first. Return current output instead.
+                    const skipWait =
+                        pendingDecisionJobId === job.id &&
+                        job.status === "running";
 
-                    if (job.status === "running" && waitForCompletion) {
+                    if (
+                        job.status === "running" &&
+                        waitForCompletion &&
+                        !skipWait
+                    ) {
                         if (!job.donePromise) createJobDonePromise(job);
 
                         onUpdate?.({
