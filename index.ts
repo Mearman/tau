@@ -1026,8 +1026,35 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_end", async () => {
-		notify("Pi", "Ready for input");
+	// ── Notifications ────────────────────────────────────────────────────
+
+	const NOTIFICATION_BODY_MAX = 200;
+
+	function truncateNotificationBody(text: string): string {
+		const firstLine = text.split("\n")[0] ?? "";
+		if (firstLine.length <= NOTIFICATION_BODY_MAX) return firstLine;
+		return firstLine.slice(0, NOTIFICATION_BODY_MAX - 1) + "\u2026"; // ellipsis
+	}
+
+	/** Extract the last assistant text from the message history. */
+	function lastAssistantText(messages: Array<{ role: string; content?: Array<{ type: string; text?: string }> }>): string | undefined {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const msg = messages[i];
+			if (msg.role === "assistant" && Array.isArray(msg.content)) {
+				for (const block of msg.content) {
+					if (block.type === "text" && block.text) {
+						return block.text;
+					}
+				}
+			}
+		}
+		return undefined;
+	}
+
+	pi.on("agent_end", async (event) => {
+		const body = lastAssistantText(event.messages);
+		const notificationBody = body ? truncateNotificationBody(body) : "Ready for input";
+		notify("Pi", notificationBody);
 	});
 
 	pi.on("session_shutdown", async () => {
