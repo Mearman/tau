@@ -84,6 +84,13 @@ export function markJobTerminal(
     status: JobStatus,
     exitCode?: number
 ): void {
+    if (
+        job.status === "completed" ||
+        job.status === "failed" ||
+        job.status === "killed"
+    ) {
+        return;
+    }
     job.status = status;
     job.exitCode = exitCode;
     delete job.proc;

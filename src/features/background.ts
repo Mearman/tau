@@ -38,6 +38,19 @@ import {
     formatJobLine,
 } from "../utils.ts";
 
+// ─── Kill helpers ───────────────────────────────────────────────────
+
+/**
+ * Mark a job as killed and suppress the completion notification.
+ * Use in every kill path (tool, shortcut, watchdog) to prevent
+ * proc.on("close") from sending a spurious job-completion message
+ * that re-enters the agent loop.
+ */
+export function silenceJobAfterKill(job: BackgroundJob): void {
+    markJobTerminal(job, "killed");
+    job.outputConsumed = true;
+}
+
 // ─── Stall watchdog ─────────────────────────────────────────────────
 
 function startStallWatchdog(
@@ -261,7 +274,7 @@ export function backgroundProcess(
         pi,
         () => {
             if (rp.proc.pid) killProcessGroup(rp.proc.pid, "SIGTERM");
-            markJobTerminal(state.backgroundJobs.get(jobId)!, "killed");
+            silenceJobAfterKill(state.backgroundJobs.get(jobId)!);
         }
     );
 
@@ -583,7 +596,7 @@ export function registerBackgroundJobs(
                 pi,
                 () => {
                     if (proc.pid) killProcessGroup(proc.pid, "SIGTERM");
-                    markJobTerminal(job, "killed");
+                    silenceJobAfterKill(job);
                 }
             );
 
@@ -706,7 +719,7 @@ export function registerBackgroundJobs(
                         throw new Error(`Job is not running: ${job.id}`);
                     }
                     killProcessGroup(job.proc.pid!, "SIGTERM");
-                    markJobTerminal(job, "killed");
+                    silenceJobAfterKill(job);
                     clearPendingDecision(state, job);
                     return {
                         content: [
@@ -818,7 +831,7 @@ export function registerBackgroundJobs(
                     if (job.proc && job.status === "running") {
                         killProcessGroup(job.proc.pid!, "SIGTERM");
                     }
-                    markJobTerminal(job, "killed");
+                    silenceJobAfterKill(job);
                     state.pendingDecisionJobId = undefined;
                     return {
                         content: [{ type: "text", text: `Killed ${job.id}.` }],

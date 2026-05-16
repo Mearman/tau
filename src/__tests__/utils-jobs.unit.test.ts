@@ -37,6 +37,26 @@ void describe("markJobTerminal", () => {
         assert.equal(job.exitCode, 1);
     });
 
+    void it("is a no-op when the job is already killed", () => {
+        const job: BackgroundJob = {
+            id: "job-5",
+            command: "sleep 10",
+            pid: 127,
+            startTime: Date.now(),
+            status: "running",
+            logPath: "/tmp/pi-bg-job-5.log",
+            toolCallId: "tc-5",
+        };
+        createJobDonePromise(job);
+        markJobTerminal(job, "killed");
+        assert.equal(job.status, "killed");
+
+        // Simulate proc.on("close") firing after the kill
+        markJobTerminal(job, "completed", 0);
+        assert.equal(job.status, "killed");
+        assert.equal(job.exitCode, undefined);
+    });
+
     void it("resolves the done promise", async () => {
         const job: BackgroundJob = {
             id: "job-3",

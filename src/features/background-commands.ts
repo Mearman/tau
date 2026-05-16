@@ -8,13 +8,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { BackgroundJob, UiContext } from "../types.ts";
-import { backgroundProcess, updateWidget } from "./background.ts";
+import {
+    backgroundProcess,
+    updateWidget,
+    silenceJobAfterKill,
+} from "./background.ts";
 import {
     MAX_OUTPUT_PREVIEW_CHARS,
     createJobDonePromise,
     formatDuration,
     killProcessGroup,
-    markJobTerminal,
     readOutputTail,
 } from "../utils.ts";
 
@@ -129,7 +132,7 @@ async function showTaskDetail(
             );
         } else if (action === actions[2]) {
             if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
-            markJobTerminal(job, "killed");
+            silenceJobAfterKill(job);
             ctx.ui.notify(`Killed ${job.id}`, "info");
             updateWidget(state, ctx);
         }
@@ -252,7 +255,7 @@ export function registerBackgroundCommands(
 
             const job = runningJobs[0];
             if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
-            markJobTerminal(job, "killed");
+            silenceJobAfterKill(job);
             ctx.ui.notify(`Killed ${job.id}`, "info");
             updateWidget(state, ctx);
         },
