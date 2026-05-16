@@ -4,10 +4,11 @@ import {
     registerBackgroundJobs,
     clearPendingDecision,
     lookupJob,
+    startTimeoutTimer,
 } from "../features/background.ts";
 import { registerBackgroundCommands } from "../features/background-commands.ts";
 import { TauState } from "../state.ts";
-import type { BackgroundJob } from "../types.ts";
+import type { BackgroundJob, RunningProcess } from "../types.ts";
 import { createJobDonePromise } from "../utils.ts";
 import { silenceJobAfterKill } from "../features/background.ts";
 
@@ -477,5 +478,142 @@ void describe("silenceJobAfterKill", () => {
         silenceJobAfterKill(job);
         assert.equal(job.status, "killed");
         assert.equal(job.outputConsumed, true);
+    });
+});
+
+// ─── startTimeoutTimer ───────────────────────────────────────────────────
+
+void describe("startTimeoutTimer", () => {
+    void it("uses explicit timeout when provided instead of DEFAULT_TIMEOUT_MS", async () => {
+        const state = new TauState();
+        let sentMessageType: string | undefined;
+
+        const mockPi = {
+            sendMessage: (msg: { customType: string }) => {
+                sentMessageType = msg.customType;
+            },
+        } as never;
+        const mockCtx = {
+            ui: {
+                notify: () => {},
+                setWidget: () => {},
+                setStatus: () => {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const proc = {
+            pid: -77777,
+            on: () => {},
+            stdout: { removeListener: () => {}, pipe: () => {} },
+            stderr: { removeListener: () => {}, pipe: () => {} },
+        } as never;
+        const rp: RunningProcess = {
+            toolCallId: "tc-timeout-1",
+            proc,
+            command: "sleep 60 && gh run view",
+            backgrounded: false,
+            output: "",
+        };
+        state.runningProcesses.set("tc-timeout-1", rp);
+        state.currentlyRunningToolCallId = "tc-timeout-1";
+
+        // Use a short explicit timeout of 50ms so the test runs fast
+        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx, 50);
+
+        // Wait long enough for the timer to fire
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Process SHOULD have been backgrounded after the explicit timeout
+        assert.equal(
+            rp.backgrounded,
+            true,
+            "Should be backgrounded after explicit timeout fires"
+        );
+        assert.equal(
+            sentMessageType,
+            "bg-timeout",
+            "Should have sent bg-timeout message"
+        );
+
+        clearTimeout(timer);
+    });
+
+    void it("does NOT fire before the explicit timeout elapses", async () => {
+        const state = new TauState();
+        let sentMessageType: string | undefined;
+
+        const mockPi = {
+            sendMessage: (msg: { customType: string }) => {
+                sentMessageType = msg.customType;
+            },
+        } as never;
+        const mockCtx = {
+            ui: {
+                notify: () => {},
+                setWidget: () => {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const rp: RunningProcess = {
+            toolCallId: "tc-timeout-3",
+            proc: { pid: -77779 } as never,
+            command: "sleep 60 && gh run view",
+            backgrounded: false,
+            output: "",
+        };
+        state.runningProcesses.set("tc-timeout-3", rp);
+        state.currentlyRunningToolCallId = "tc-timeout-3";
+
+        // Use an explicit timeout of 500ms
+        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx, 500);
+
+        // Wait 100ms — less than the explicit timeout
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Process should NOT have been backgrounded yet
+        assert.equal(
+            rp.backgrounded,
+            false,
+            "Should NOT be backgrounded before explicit timeout fires"
+        );
+        assert.equal(
+            sentMessageType,
+            undefined,
+            "Should not have sent bg-timeout message yet"
+        );
+
+        clearTimeout(timer);
+    });
+
+    void it("uses DEFAULT_TIMEOUT_MS when no explicit timeout provided", () => {
+        const state = new TauState();
+
+        const mockPi = {
+            sendMessage: () => {},
+        } as never;
+        const mockCtx = {
+            ui: {
+                notify: () => {},
+                setWidget: () => {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const rp: RunningProcess = {
+            toolCallId: "tc-timeout-2",
+            proc: { pid: -77778 } as never,
+            command: "echo slow",
+            backgrounded: false,
+            output: "",
+        };
+        state.runningProcesses.set("tc-timeout-2", rp);
+        state.currentlyRunningToolCallId = "tc-timeout-2";
+
+        // Without an explicit timeout, the timer uses DEFAULT_TIMEOUT_MS (15s)
+        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx);
+        assert.ok(timer, "Timer created with default timeout");
+        clearTimeout(timer);
     });
 });

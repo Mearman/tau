@@ -304,12 +304,15 @@ export function backgroundProcess(
 
 // ── Default timeout timer ─────────────────────────────────────────
 
-function startTimeoutTimer(
+export function startTimeoutTimer(
     rp: RunningProcess,
     state: TauState,
     pi: ExtensionAPI,
-    ctx: ExtensionContext
+    ctx: ExtensionContext,
+    explicitTimeoutMs?: number
 ): NodeJS.Timeout {
+    const timeoutMs = explicitTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+
     const timer = setTimeout(() => {
         if (state.currentlyRunningToolCallId !== rp.toolCallId) return;
         if (rp.backgrounded) return;
@@ -323,7 +326,7 @@ function startTimeoutTimer(
 
         state.pendingDecisionJobId = job.id;
 
-        const duration = formatDuration(DEFAULT_TIMEOUT_MS);
+        const duration = formatDuration(timeoutMs);
         pi.sendMessage(
             {
                 customType: "bg-timeout",
@@ -346,7 +349,7 @@ function startTimeoutTimer(
             },
             { deliverAs: "followUp", triggerTurn: true }
         );
-    }, DEFAULT_TIMEOUT_MS);
+    }, timeoutMs);
     timer.unref();
     return timer;
 }
@@ -513,7 +516,15 @@ export function registerBackgroundJobs(
                         });
                     }
 
-                    startTimeoutTimer(rp, state, pi, ctx);
+                    startTimeoutTimer(
+                        rp,
+                        state,
+                        pi,
+                        ctx,
+                        typeof params.timeout === "number"
+                            ? params.timeout * 1_000
+                            : undefined
+                    );
 
                     const hintTimer = setTimeout(() => {
                         ctx.ui.notify("⏱ Ctrl+B to background", "info");
