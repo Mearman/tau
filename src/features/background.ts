@@ -153,6 +153,19 @@ export function updateWidget(state: TauState, ctx: UiContext): void {
     );
 }
 
+/**
+ * Clear pendingDecisionJobId if it matches the given job's id.
+ * Extracted so both bash_bg close/error handlers and job_decide
+ * can share the same logic.
+ */
+export function clearPendingDecision(
+    state: TauState,
+    job: BackgroundJob
+): void {
+    if (state.pendingDecisionJobId === job.id)
+        state.pendingDecisionJobId = undefined;
+}
+
 /** Send a structured completion notification to the agent. */
 export function notifyCompletion(
     job: BackgroundJob,
@@ -415,8 +428,7 @@ export function registerBackgroundJobs(
                                         : "failed",
                                     code ?? 0
                                 );
-                                if (state.pendingDecisionJobId === job.id)
-                                    state.pendingDecisionJobId = undefined;
+                                clearPendingDecision(state, job);
                                 notifyCompletion(job, state, pi, ctx);
                                 updateWidget(state, ctx);
                             }
@@ -449,8 +461,7 @@ export function registerBackgroundJobs(
                             ).find((j) => j.toolCallId === toolCallId);
                             if (job) {
                                 markJobTerminal(job, "failed");
-                                if (state.pendingDecisionJobId === job.id)
-                                    state.pendingDecisionJobId = undefined;
+                                clearPendingDecision(state, job);
                                 notifyCompletion(job, state, pi, ctx);
                                 updateWidget(state, ctx);
                             }
@@ -569,6 +580,7 @@ export function registerBackgroundJobs(
                     code === 0 || code === null ? "completed" : "failed",
                     code ?? 0
                 );
+                clearPendingDecision(state, job);
                 if (shouldNotify) notifyCompletion(job, state, pi, ctx);
                 updateWidget(state, ctx);
             });
@@ -576,8 +588,7 @@ export function registerBackgroundJobs(
             proc.on("error", () => {
                 cancelStall();
                 markJobTerminal(job, "failed");
-                if (state.pendingDecisionJobId === job.id)
-                    state.pendingDecisionJobId = undefined;
+                clearPendingDecision(state, job);
                 if (shouldNotify) notifyCompletion(job, state, pi, ctx);
                 updateWidget(state, ctx);
             });
@@ -682,8 +693,7 @@ export function registerBackgroundJobs(
                     }
                     killProcessGroup(job.proc.pid!, "SIGTERM");
                     markJobTerminal(job, "killed");
-                    if (state.pendingDecisionJobId === job.id)
-                        state.pendingDecisionJobId = undefined;
+                    clearPendingDecision(state, job);
                     return {
                         content: [
                             {
@@ -777,6 +787,7 @@ export function registerBackgroundJobs(
         ): Promise<AgentToolResult<undefined>> {
             const job = state.backgroundJobs.get(params.jobId);
             if (!job) {
+                state.pendingDecisionJobId = undefined;
                 return {
                     content: [
                         {
