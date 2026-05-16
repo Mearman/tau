@@ -1,0 +1,21 @@
+{
+    "all": true,
+    "src": ["src"],
+    "include": ["src/**/*.ts"],
+    "exclude": [
+        "src/**/*.test.ts",
+        "src/__tests__/**",
+        "src/index.ts",
+        "src/types.ts",
+        "src/state.ts",
+        "src/features/bookmark.ts",
+        "src/features/custom-footer.ts",
+        "src/features/git-checkpoint.ts",
+        "src/features/session-name.ts",
+        "src/features/background.ts",
+        "src/features/background-commands.ts",
+        "src/features/notifications.ts",
+        "src/features/tools-selector.ts"
+    ],
+    "reporter": ["text"]
+}
