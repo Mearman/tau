@@ -14,6 +14,7 @@ const config: UserConfig = {
                 "status",
                 "titlebar",
                 "plan",
+                "task",
                 "todo",
                 "ui",
                 "build",
