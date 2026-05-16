@@ -1,14 +1,16 @@
 /**
  * Task feature — task tool for the LLM and /tasks command for the user.
  *
- * Supports nesting (via parentId), directional links (blocks, depends-on,
- * related), and five status states. Tasks are stored as a flat array;
- * the tree is computed for rendering.
+ * All relationships (hierarchy, blocking, dependencies) are modelled as
+ * links on the links array. Hierarchy uses "child-of" links. Tasks are
+ * stored as a flat array; the tree is computed for rendering.
  */
 
 import type {
+    AgentToolResult,
     ExtensionAPI,
     ExtensionContext,
+    ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
@@ -41,8 +43,27 @@ export function findTaskById(tasks: Task[], id: number): Task | undefined {
     return tasks.find((t) => t.id === id);
 }
 
-export function getChildIds(tasks: Task[], parentId: number): number[] {
-    return tasks.filter((t) => t.parentId === parentId).map((t) => t.id);
+export function getParentId(tasks: Task[], taskId: number): number | undefined {
+    const task = findTaskById(tasks, taskId);
+    if (!task) return undefined;
+    const childOfLink = task.links.find((l) => l.type === "child-of");
+    return childOfLink?.targetId;
+}
+
+export function findChildIds(tasks: Task[], parentId: number): number[] {
+    return tasks
+        .filter((t) =>
+            t.links.some(
+                (l) => l.type === "child-of" && l.targetId === parentId
+            )
+        )
+        .map((t) => t.id);
+}
+
+export function findChildTasks(tasks: Task[], parentId: number): Task[] {
+    return tasks.filter((t) =>
+        t.links.some((l) => l.type === "child-of" && l.targetId === parentId)
+    );
 }
 
 /**
@@ -52,11 +73,11 @@ export function getChildIds(tasks: Task[], parentId: number): number[] {
  */
 export function getAncestorIds(tasks: Task[], taskId: number): Set<number> {
     const ancestors = new Set<number>();
-    let current = findTaskById(tasks, taskId);
-    while (current?.parentId !== undefined) {
-        if (ancestors.has(current.parentId)) break; // cycle guard
-        ancestors.add(current.parentId);
-        current = findTaskById(tasks, current.parentId);
+    let currentParent = getParentId(tasks, taskId);
+    while (currentParent !== undefined) {
+        if (ancestors.has(currentParent)) break; // cycle guard
+        ancestors.add(currentParent);
+        currentParent = getParentId(tasks, currentParent);
     }
     return ancestors;
 }
@@ -69,7 +90,7 @@ export function getDescendantIds(tasks: Task[], taskId: number): Set<number> {
     const stack = [taskId];
     while (stack.length > 0) {
         const id = stack.pop()!;
-        for (const child of tasks.filter((t) => t.parentId === id)) {
+        for (const child of findChildTasks(tasks, id)) {
             if (!descendants.has(child.id)) {
                 descendants.add(child.id);
                 stack.push(child.id);
@@ -102,15 +123,21 @@ export function formatTaskTree(
     depth = 0,
     parentId: number | undefined = undefined
 ): string {
-    const children = tasks.filter((t) => t.parentId === parentId);
+    const children =
+        parentId === undefined
+            ? tasks.filter((t) => !t.links.some((l) => l.type === "child-of"))
+            : findChildTasks(tasks, parentId);
     const indent = "  ".repeat(depth);
     const lines: string[] = [];
     for (const task of children) {
         const statusIcon = statusIconFor(task.status);
         lines.push(`${indent}${statusIcon} #${task.id}: ${task.title}`);
-        // Show links inline
-        if (task.links.length > 0) {
-            const linkStr = task.links
+        // Show non-hierarchy links inline
+        const nonHierarchyLinks = task.links.filter(
+            (l) => l.type !== "child-of"
+        );
+        if (nonHierarchyLinks.length > 0) {
+            const linkStr = nonHierarchyLinks
                 .map((l) => `${l.type} #${l.targetId}`)
                 .join(", ");
             lines.push(`${indent}  ↳ ${linkStr}`);
@@ -223,7 +250,12 @@ export class TaskListComponent {
         lines: string[]
     ): void {
         const th = this.theme;
-        const children = tasks.filter((t) => t.parentId === parentId);
+        const children =
+            parentId === undefined
+                ? tasks.filter(
+                      (t) => !t.links.some((l) => l.type === "child-of")
+                  )
+                : findChildTasks(tasks, parentId);
         const indent = "  ".repeat(depth + 1);
 
         for (const task of children) {
@@ -240,9 +272,12 @@ export class TaskListComponent {
                 truncateToWidth(`${indent}${icon} ${id} ${title}`, width)
             );
 
-            // Show links
-            if (task.links.length > 0) {
-                const linkStr = task.links
+            // Show non-hierarchy links
+            const nonHierarchyLinks = task.links.filter(
+                (l) => l.type !== "child-of"
+            );
+            if (nonHierarchyLinks.length > 0) {
+                const linkStr = nonHierarchyLinks
                     .map(
                         (l) => `${l.type}→${th.fg("accent", "#" + l.targetId)}`
                     )
@@ -323,9 +358,25 @@ const TaskParams = Type.Object({
     to: Type.Optional(
         Type.Number({ description: "Target task ID (for link, unlink)" })
     ),
+    linkWith: Type.Optional(
+        Type.Number({
+            description:
+                "Other task ID to link with on creation (for add). " +
+                "Direction is set by linkDirection.",
+        })
+    ),
+    linkDirection: Type.Optional(
+        StringEnum(["from", "to"] as const, {
+            description:
+                "Link direction for add with linkWith. " +
+                '"from": new task is the source (new→target). ' +
+                '"to": new task is the target (other→new). ' +
+                'Default: "from".',
+        })
+    ),
     type: Type.Optional(
-        StringEnum(["blocks", "depends-on", "related"] as const, {
-            description: "Link type (for link)",
+        StringEnum(["blocks", "depends-on", "related", "child-of"] as const, {
+            description: "Link type (for link, add with linkWith)",
         })
     ),
     cascade: Type.Optional(
@@ -335,6 +386,141 @@ const TaskParams = Type.Object({
         })
     ),
 });
+
+// ─── Result renderer ────────────────────────────────────────────────
+
+// Colours used by taskRenderResult. Theme.fg accepts ThemeColor (a wider
+// union) so Theme is assignable to this narrower type by contravariance.
+type TaskThemeColour =
+    | "accent"
+    | "dim"
+    | "error"
+    | "muted"
+    | "success"
+    | "warning";
+
+export function taskRenderResult(
+    result: AgentToolResult<unknown>,
+    options: ToolRenderResultOptions,
+    theme: {
+        fg: (colour: TaskThemeColour, text: string) => string;
+        bold: (text: string) => string;
+    }
+) {
+    const { expanded } = options;
+    const details = result.details as TaskDetails | undefined;
+    if (!details) {
+        const text = result.content[0];
+        return new Text(text?.type === "text" ? text.text : "", 0, 0);
+    }
+    if (details.error)
+        return new Text(theme.fg("error", "Error: " + details.error), 0, 0);
+
+    switch (details.action) {
+        case "list": {
+            const taskList = details.tasks;
+            if (taskList.length === 0)
+                return new Text(theme.fg("dim", "No tasks"), 0, 0);
+            let listText = theme.fg(
+                "muted",
+                String(taskList.length) + " task(s):"
+            );
+            const display = expanded ? taskList : taskList.slice(0, 5);
+            for (const t of display) {
+                const icon =
+                    t.status === "done"
+                        ? theme.fg("success", "✓")
+                        : t.status === "in-progress"
+                          ? theme.fg("warning", "◐")
+                          : t.status === "blocked"
+                            ? theme.fg("error", "✗")
+                            : theme.fg("dim", "○");
+                const title =
+                    t.status === "done"
+                        ? theme.fg("dim", t.title)
+                        : theme.fg("muted", t.title);
+                const taskParentId = t.links.find(
+                    (l) => l.type === "child-of"
+                )?.targetId;
+                const parentStr = taskParentId
+                    ? ` ${theme.fg("dim", "↰ #" + taskParentId)}`
+                    : "";
+                listText += `\n${icon} ${theme.fg("accent", `#${t.id}`)} ${title}${parentStr}`;
+            }
+            if (!expanded && taskList.length > 5) {
+                listText += `\n${theme.fg("dim", `... ${taskList.length - 5} more`)}`;
+            }
+            return new Text(listText, 0, 0);
+        }
+        case "add": {
+            const added = details.tasks.find(
+                (t) => t.id === details.nextId - 1
+            );
+            return new Text(
+                theme.fg("success", "✓ Added ") +
+                    theme.fg("accent", `#${added?.id ?? "?"}`) +
+                    " " +
+                    theme.fg("muted", added?.title ?? ""),
+                0,
+                0
+            );
+        }
+        case "update": {
+            return new Text(
+                theme.fg("success", "✓ ") +
+                    theme.fg(
+                        "muted",
+                        result.content[0]?.type === "text"
+                            ? result.content[0].text
+                            : ""
+                    ),
+                0,
+                0
+            );
+        }
+        case "remove": {
+            const text = result.content[0];
+            const msg = text?.type === "text" ? text.text : "";
+            return new Text(
+                theme.fg("success", "✓ ") + theme.fg("muted", msg),
+                0,
+                0
+            );
+        }
+        case "move": {
+            const text = result.content[0];
+            const msg = text?.type === "text" ? text.text : "";
+            return new Text(
+                theme.fg("success", "✓ ") + theme.fg("muted", msg),
+                0,
+                0
+            );
+        }
+        case "link": {
+            const text = result.content[0];
+            const msg = text?.type === "text" ? text.text : "";
+            return new Text(
+                theme.fg("success", "✓ ") + theme.fg("muted", msg),
+                0,
+                0
+            );
+        }
+        case "unlink": {
+            const text = result.content[0];
+            const msg = text?.type === "text" ? text.text : "";
+            return new Text(
+                theme.fg("success", "✓ ") + theme.fg("muted", msg),
+                0,
+                0
+            );
+        }
+        default: {
+            const text = result.content[0];
+            const msg = text?.type === "text" ? text.text : "";
+            return new Text(theme.fg("muted", msg), 0, 0);
+        }
+    }
+}
 
 // ─── Feature registration ───────────────────────────────────────────
 
@@ -390,115 +576,8 @@ export function registerTask(pi: ExtensionAPI, state: TauState): void {
             return new Text(text, 0, 0);
         },
 
-        renderResult(result, { expanded }, theme) {
-            const details = result.details as TaskDetails | undefined;
-            if (!details) {
-                const text = result.content[0];
-                return new Text(text?.type === "text" ? text.text : "", 0, 0);
-            }
-            if (details.error)
-                return new Text(
-                    theme.fg("error", "Error: " + details.error),
-                    0,
-                    0
-                );
-
-            switch (details.action) {
-                case "list": {
-                    const taskList = details.tasks;
-                    if (taskList.length === 0)
-                        return new Text(theme.fg("dim", "No tasks"), 0, 0);
-                    let listText = theme.fg(
-                        "muted",
-                        String(taskList.length) + " task(s):"
-                    );
-                    const display = expanded ? taskList : taskList.slice(0, 5);
-                    for (const t of display) {
-                        const icon =
-                            t.status === "done"
-                                ? theme.fg("success", "✓")
-                                : t.status === "in-progress"
-                                  ? theme.fg("warning", "◐")
-                                  : t.status === "blocked"
-                                    ? theme.fg("error", "✗")
-                                    : theme.fg("dim", "○");
-                        const title =
-                            t.status === "done"
-                                ? theme.fg("dim", t.title)
-                                : theme.fg("muted", t.title);
-                        const parentStr = t.parentId
-                            ? ` ${theme.fg("dim", "↰ #" + t.parentId)}`
-                            : "";
-                        listText += `\n${icon} ${theme.fg("accent", `#${t.id}`)} ${title}${parentStr}`;
-                    }
-                    if (!expanded && taskList.length > 5) {
-                        listText += `\n${theme.fg("dim", `... ${taskList.length - 5} more`)}`;
-                    }
-                    return new Text(listText, 0, 0);
-                }
-                case "add": {
-                    const added = details.tasks.find(
-                        (t) => t.id === details.nextId - 1
-                    );
-                    return new Text(
-                        theme.fg("success", "✓ Added ") +
-                            theme.fg("accent", `#${added?.id ?? "?"}`) +
-                            " " +
-                            theme.fg("muted", added?.title ?? ""),
-                        0,
-                        0
-                    );
-                }
-                case "update": {
-                    return new Text(
-                        theme.fg("success", "✓ ") +
-                            theme.fg(
-                                "muted",
-                                result.content[0]?.type === "text"
-                                    ? result.content[0].text
-                                    : ""
-                            ),
-                        0,
-                        0
-                    );
-                }
-                case "remove": {
-                    const text = result.content[0];
-                    const msg = text?.type === "text" ? text.text : "";
-                    return new Text(
-                        theme.fg("success", "✓ ") + theme.fg("muted", msg),
-                        0,
-                        0
-                    );
-                }
-                case "move": {
-                    const text = result.content[0];
-                    const msg = text?.type === "text" ? text.text : "";
-                    return new Text(
-                        theme.fg("success", "✓ ") + theme.fg("muted", msg),
-                        0,
-                        0
-                    );
-                }
-                case "link": {
-                    const text = result.content[0];
-                    const msg = text?.type === "text" ? text.text : "";
-                    return new Text(
-                        theme.fg("success", "✓ ") + theme.fg("muted", msg),
-                        0,
-                        0
-                    );
-                }
-                case "unlink": {
-                    const text = result.content[0];
-                    const msg = text?.type === "text" ? text.text : "";
-                    return new Text(
-                        theme.fg("success", "✓ ") + theme.fg("muted", msg),
-                        0,
-                        0
-                    );
-                }
-            }
+        renderResult(result, options, theme) {
+            return taskRenderResult(result, options, theme);
         },
     });
 
@@ -544,6 +623,9 @@ function handleAdd(
         description?: string;
         parent?: number;
         status?: string;
+        linkWith?: number;
+        linkDirection?: string;
+        type?: string;
     }
 ) {
     if (!params.title) return errorResult(state, "title required for add");
@@ -568,17 +650,62 @@ function handleAdd(
         title: params.title,
         ...(params.description ? { description: params.description } : {}),
         status,
-        ...(params.parent !== undefined ? { parentId: params.parent } : {}),
         links: [],
         createdAt: Date.now(),
     };
+
+    // Establish hierarchy via child-of link
+    if (params.parent !== undefined) {
+        newTask.links.push({ targetId: params.parent, type: "child-of" });
+    }
+
     state.tasks.push(newTask);
+
+    // Optionally link with another task on creation
+    if (params.linkWith !== undefined) {
+        const other = findTaskById(state.tasks, params.linkWith);
+        if (!other) {
+            // Roll back the add — the link target doesn't exist
+            state.tasks.pop();
+            state.nextTaskId--;
+            return errorResult(
+                state,
+                `link target #${params.linkWith} not found`
+            );
+        }
+
+        const linkType = (params.type ?? "related") as TaskLink["type"];
+        if (
+            !["blocks", "depends-on", "related", "child-of"].includes(linkType)
+        ) {
+            state.tasks.pop();
+            state.nextTaskId--;
+            return errorResult(state, `invalid link type: ${params.type}`);
+        }
+
+        const direction = params.linkDirection ?? "from";
+
+        if (direction === "from") {
+            // new task is the source: new→other
+            newTask.links.push({ targetId: params.linkWith, type: linkType });
+        } else {
+            // new task is the target: other→new
+            other.links.push({ targetId: newTask.id, type: linkType });
+        }
+    }
+
+    const linkSuffix =
+        params.linkWith !== undefined
+            ? params.linkDirection === "to"
+                ? ` (#${params.linkWith} ${params.type ?? "related"}→#${newTask.id})`
+                : ` (#${newTask.id} ${params.type ?? "related"}→#${params.linkWith})`
+            : "";
 
     return {
         content: [
             {
                 type: "text" as const,
-                text: `Added task #${newTask.id}: ${newTask.title}`,
+                text: `Added task #${newTask.id}: ${newTask.title}${linkSuffix}`,
             },
         ],
         details: {
@@ -644,9 +771,7 @@ function handleRemove(
 
     const cascade = params.cascade ?? false;
     const descendants = getDescendantIds(state.tasks, params.id);
-    const childCount = state.tasks.filter(
-        (t) => t.parentId === params.id
-    ).length;
+    const childCount = findChildIds(state.tasks, params.id).length;
 
     if (childCount > 0 && !cascade)
         return errorResult(
@@ -660,9 +785,17 @@ function handleRemove(
 
     // If not cascading, orphan the children (reparent to task's parent or root)
     if (!cascade) {
+        const taskParentId = getParentId(state.tasks, params.id);
         for (const t of state.tasks) {
-            if (t.parentId === params.id) {
-                t.parentId = task.parentId;
+            const childLink = t.links.find(
+                (l) => l.type === "child-of" && l.targetId === params.id
+            );
+            if (childLink) {
+                if (taskParentId !== undefined) {
+                    childLink.targetId = taskParentId;
+                } else {
+                    t.links = t.links.filter((l) => l !== childLink);
+                }
             }
         }
     }
@@ -707,7 +840,20 @@ function handleMove(state: TauState, params: { id?: number; parent?: number }) {
     if (wouldCreateCycle(state.tasks, params.id, newParent))
         return errorResult(state, "move would create a cycle");
 
-    task.parentId = newParent;
+    // Update or create/remove the child-of link
+    const existingLink = task.links.find((l) => l.type === "child-of");
+    if (newParent !== undefined) {
+        if (existingLink) {
+            existingLink.targetId = newParent;
+        } else {
+            task.links.push({ targetId: newParent, type: "child-of" });
+        }
+    } else {
+        // Move to root — remove the child-of link
+        if (existingLink) {
+            task.links = task.links.filter((l) => l !== existingLink);
+        }
+    }
 
     return {
         content: [
@@ -743,7 +889,10 @@ function handleLink(
     if (!toTask) return errorResult(state, `task #${params.to} not found`);
 
     const linkType = params.type as TaskLink["type"];
-    if (!linkType || !["blocks", "depends-on", "related"].includes(linkType))
+    if (
+        !linkType ||
+        !["blocks", "depends-on", "related", "child-of"].includes(linkType)
+    )
         return errorResult(
             state,
             `invalid link type: ${params.type ?? "(missing)"}`

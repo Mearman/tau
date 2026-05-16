@@ -168,7 +168,11 @@ void describe("task tool — add action", () => {
             null
         );
         assert.ok(result.content[0].text.includes("Added task #2"));
-        assert.equal(state.tasks[1].parentId, 1);
+        assert.ok(
+            state.tasks[1].links.some(
+                (l) => l.type === "child-of" && l.targetId === 1
+            )
+        );
     });
 
     void it("returns error when title is missing", async () => {
@@ -383,9 +387,8 @@ void describe("task tool — remove action", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         state.nextTaskId = 3;
@@ -417,17 +420,15 @@ void describe("task tool — remove action", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
             {
                 id: 3,
                 title: "Grandchild",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 2, type: "child-of" }],
                 createdAt: 0,
-                parentId: 2,
             },
         ];
         const tool = captureTaskTool(state);
@@ -529,7 +530,11 @@ void describe("task tool — move action", () => {
             null
         );
         assert.ok(result.content[0].text.includes("Moved task #2 under #1"));
-        assert.equal(state.tasks[1].parentId, 1);
+        assert.ok(
+            state.tasks[1].links.some(
+                (l) => l.type === "child-of" && l.targetId === 1
+            )
+        );
     });
 
     void it("moves a task to root with undefined parent", async () => {
@@ -546,9 +551,8 @@ void describe("task tool — move action", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         const tool = captureTaskTool(state);
@@ -560,7 +564,7 @@ void describe("task tool — move action", () => {
             null
         );
         assert.ok(result.content[0].text.includes("Moved task #2 to root"));
-        assert.equal(state.tasks[1].parentId, undefined);
+        assert.ok(!state.tasks[1].links.some((l) => l.type === "child-of"));
     });
 
     void it("returns error when id is missing", async () => {
@@ -626,9 +630,8 @@ void describe("task tool — move action", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         const tool = captureTaskTool(state);
@@ -1154,9 +1157,8 @@ void describe("task tool — renderResult", () => {
                             id: 2,
                             title: "Nested",
                             status: "todo",
-                            links: [],
+                            links: [{ targetId: 1, type: "child-of" }],
                             createdAt: 0,
-                            parentId: 1,
                         },
                     ],
                     nextId: 3,

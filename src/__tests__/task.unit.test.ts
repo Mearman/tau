@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
     findTaskById,
-    getChildIds,
+    getParentId,
+    findChildIds,
     getAncestorIds,
     getDescendantIds,
     wouldCreateCycle,
@@ -29,7 +30,30 @@ void describe("findTaskById", () => {
     });
 });
 
-void describe("getChildIds", () => {
+void describe("getParentId", () => {
+    void it("returns parent from child-of link", () => {
+        const tasks: Task[] = [
+            { id: 1, title: "Root", status: "todo", links: [], createdAt: 0 },
+            {
+                id: 2,
+                title: "Child",
+                status: "todo",
+                links: [{ targetId: 1, type: "child-of" }],
+                createdAt: 0,
+            },
+        ];
+        assert.equal(getParentId(tasks, 2), 1);
+    });
+
+    void it("returns undefined for root task", () => {
+        const tasks: Task[] = [
+            { id: 1, title: "Root", status: "todo", links: [], createdAt: 0 },
+        ];
+        assert.equal(getParentId(tasks, 1), undefined);
+    });
+});
+
+void describe("findChildIds", () => {
     void it("returns children of a parent", () => {
         const tasks: Task[] = [
             { id: 1, title: "Root", status: "todo", links: [], createdAt: 0 },
@@ -37,17 +61,15 @@ void describe("getChildIds", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
             {
                 id: 3,
                 title: "Other",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
             {
                 id: 4,
@@ -57,14 +79,14 @@ void describe("getChildIds", () => {
                 createdAt: 0,
             },
         ];
-        assert.deepEqual(getChildIds(tasks, 1), [2, 3]);
+        assert.deepEqual(findChildIds(tasks, 1), [2, 3]);
     });
 
     void it("returns empty for childless task", () => {
         const tasks: Task[] = [
             { id: 1, title: "Root", status: "todo", links: [], createdAt: 0 },
         ];
-        assert.deepEqual(getChildIds(tasks, 1), []);
+        assert.deepEqual(findChildIds(tasks, 1), []);
     });
 });
 
@@ -76,17 +98,15 @@ void describe("getAncestorIds", () => {
                 id: 2,
                 title: "B",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
             {
                 id: 3,
                 title: "C",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 2, type: "child-of" }],
                 createdAt: 0,
-                parentId: 2,
             },
         ];
         assert.deepEqual(getAncestorIds(tasks, 3), new Set([2, 1]));
@@ -105,17 +125,15 @@ void describe("getAncestorIds", () => {
                 id: 1,
                 title: "A",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 2, type: "child-of" }],
                 createdAt: 0,
-                parentId: 2,
             },
             {
                 id: 2,
                 title: "B",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         const ancestors = getAncestorIds(tasks, 1);
@@ -131,25 +149,22 @@ void describe("getDescendantIds", () => {
                 id: 2,
                 title: "B",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
             {
                 id: 3,
                 title: "C",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 2, type: "child-of" }],
                 createdAt: 0,
-                parentId: 2,
             },
             {
                 id: 4,
                 title: "D",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         assert.deepEqual(getDescendantIds(tasks, 1), new Set([2, 3, 4]));
@@ -183,9 +198,8 @@ void describe("wouldCreateCycle", () => {
                 id: 2,
                 title: "B",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         assert.equal(wouldCreateCycle(tasks, 1, 2), true);
@@ -225,9 +239,8 @@ void describe("formatTaskTree", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         const output = formatTaskTree(tasks);
@@ -313,9 +326,8 @@ void describe("TaskListComponent", () => {
                 id: 2,
                 title: "Child",
                 status: "todo",
-                links: [],
+                links: [{ targetId: 1, type: "child-of" }],
                 createdAt: 0,
-                parentId: 1,
             },
         ];
         const component = new TaskListComponent(tasks, theme, () => {});

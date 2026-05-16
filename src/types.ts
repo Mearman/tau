@@ -66,7 +66,7 @@ export type TaskStatus =
     | "blocked"
     | "cancelled";
 
-export type LinkType = "blocks" | "depends-on" | "related";
+export type LinkType = "blocks" | "depends-on" | "related" | "child-of";
 
 export interface TaskLink {
     targetId: number;
@@ -78,7 +78,6 @@ export interface Task {
     title: string;
     description?: string;
     status: TaskStatus;
-    parentId?: number;
     links: TaskLink[];
     createdAt: number;
 }
