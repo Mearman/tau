@@ -154,6 +154,20 @@ export function updateWidget(state: TauState, ctx: UiContext): void {
 }
 
 /**
+ * Look up a job by ID. Tries exact match first, then falls back to
+ * prepending "job-" to handle LLMs that strip the prefix.
+ */
+export function lookupJob(
+    state: TauState,
+    jobId: string
+): BackgroundJob | undefined {
+    return (
+        state.backgroundJobs.get(jobId) ??
+        state.backgroundJobs.get(`job-${jobId}`)
+    );
+}
+
+/**
  * Clear pendingDecisionJobId if it matches the given job's id.
  * Extracted so both bash_bg close/error handlers and job_decide
  * can share the same logic.
@@ -666,7 +680,7 @@ export function registerBackgroundJobs(
                 case "output": {
                     if (!params.jobId)
                         throw new Error("jobId is required for action=output");
-                    const job = state.backgroundJobs.get(params.jobId);
+                    const job = lookupJob(state, params.jobId);
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
                     const output = await readOutputTail(
                         job.logPath,
@@ -686,7 +700,7 @@ export function registerBackgroundJobs(
                 case "kill": {
                     if (!params.jobId)
                         throw new Error("jobId is required for action=kill");
-                    const job = state.backgroundJobs.get(params.jobId);
+                    const job = lookupJob(state, params.jobId);
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
                     if (job.status !== "running" || !job.proc) {
                         throw new Error(`Job is not running: ${job.id}`);
@@ -708,7 +722,7 @@ export function registerBackgroundJobs(
                 case "attach": {
                     if (!params.jobId)
                         throw new Error("jobId is required for action=attach");
-                    const job = state.backgroundJobs.get(params.jobId);
+                    const job = lookupJob(state, params.jobId);
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
 
                     const waitForCompletion = params.wait ?? true;
@@ -785,7 +799,7 @@ export function registerBackgroundJobs(
             _onUpdate,
             _ctx
         ): Promise<AgentToolResult<undefined>> {
-            const job = state.backgroundJobs.get(params.jobId);
+            const job = lookupJob(state, params.jobId);
             if (!job) {
                 state.pendingDecisionJobId = undefined;
                 return {
