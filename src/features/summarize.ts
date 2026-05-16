@@ -14,14 +14,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
 
-type ContentBlock = {
+export type ContentBlock = {
     type?: string;
     text?: string;
     name?: string;
     arguments?: Record<string, unknown>;
 };
 
-type SessionEntry = {
+export type SessionEntry = {
     type: string;
     message?: {
         role?: string;
@@ -29,7 +29,7 @@ type SessionEntry = {
     };
 };
 
-const extractTextParts = (content: unknown): string[] => {
+export const extractTextParts = (content: unknown): string[] => {
     if (typeof content === "string") {
         return [content];
     }
@@ -53,7 +53,7 @@ const extractTextParts = (content: unknown): string[] => {
     return textParts;
 };
 
-const extractToolCallLines = (content: unknown): string[] => {
+export const extractToolCallLines = (content: unknown): string[] => {
     if (!Array.isArray(content)) {
         return [];
     }
@@ -78,7 +78,7 @@ const extractToolCallLines = (content: unknown): string[] => {
     return toolCalls;
 };
 
-const buildConversationText = (entries: SessionEntry[]): string => {
+export const buildConversationText = (entries: SessionEntry[]): string => {
     const sections: string[] = [];
 
     for (const entry of entries) {
@@ -116,7 +116,7 @@ const buildConversationText = (entries: SessionEntry[]): string => {
     return sections.join("\n\n");
 };
 
-const buildSummaryPrompt = (conversationText: string): string =>
+export const buildSummaryPrompt = (conversationText: string): string =>
     [
         "Summarize this conversation so I can resume it later.",
         "Include goals, key decisions, progress, open questions, and next steps.",

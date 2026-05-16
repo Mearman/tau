@@ -7,8 +7,8 @@
  */
 
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
-import type { BackgroundJob, RunningProcess, Todo } from "./types.js";
-import type { TodoItem } from "./plan-utils.js";
+import type { BackgroundJob, RunningProcess, Task } from "./types.ts";
+import type { TodoItem } from "./plan-utils.ts";
 
 export class TauState {
     // ── Background jobs ──────────────────────────────────────────────
@@ -38,10 +38,10 @@ export class TauState {
     dndActive = false;
     dndLastCheck = 0;
 
-    // ── Todo ─────────────────────────────────────────────────────────
+    // ── Task ──────────────────────────────────────────────────────────
 
-    todos: Todo[] = [];
-    nextTodoId = 1;
+    tasks: Task[] = [];
+    nextTaskId = 1;
 
     // ── Tools selector ───────────────────────────────────────────────
 

@@ -22,12 +22,14 @@ type RepoResolution = { ok: true; repo: string } | { ok: false; error: string };
 const MAX_ISSUES = 100;
 const MAX_SUGGESTIONS = 20;
 
-function extractIssueToken(textBeforeCursor: string): string | undefined {
+export function extractIssueToken(
+    textBeforeCursor: string
+): string | undefined {
     const match = textBeforeCursor.match(/(?:^|[ \t])#([^\s#]*)$/);
     return match?.[1];
 }
 
-function parseGitHubRepo(remoteUrl: string): string | undefined {
+export function parseGitHubRepo(remoteUrl: string): string | undefined {
     const sshMatch = remoteUrl.match(
         /^git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/
     );
@@ -70,7 +72,7 @@ async function resolveGitHubRepo(
     };
 }
 
-function formatIssueItem(issue: GitHubIssue): AutocompleteItem {
+export function formatIssueItem(issue: GitHubIssue): AutocompleteItem {
     return {
         value: `#${issue.number}`,
         label: `#${issue.number}`,
@@ -78,7 +80,7 @@ function formatIssueItem(issue: GitHubIssue): AutocompleteItem {
     };
 }
 
-function filterIssues(
+export function filterIssues(
     issues: GitHubIssue[],
     query: string
 ): AutocompleteItem[] {

@@ -17,8 +17,8 @@ import {
     type BashToolDetails,
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
-import type { TauState } from "../state.js";
-import type { BackgroundJob, RunningProcess, UiContext } from "../types.js";
+import type { TauState } from "../state.ts";
+import type { BackgroundJob, RunningProcess, UiContext } from "../types.ts";
 import {
     DEFAULT_TIMEOUT_MS,
     MAX_LOG_BYTES,
@@ -36,7 +36,7 @@ import {
     readOutputTail,
     readOutputTailSync,
     formatJobLine,
-} from "../utils.js";
+} from "../utils.ts";
 
 // ─── Stall watchdog ─────────────────────────────────────────────────
 

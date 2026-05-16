@@ -7,7 +7,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-function findMarkdownFiles(dir: string, basePath: string = ""): string[] {
+export function findMarkdownFiles(
+    dir: string,
+    basePath: string = ""
+): string[] {
     const results: string[] = [];
 
     if (!fs.existsSync(dir)) {

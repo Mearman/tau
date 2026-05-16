@@ -3,8 +3,8 @@
  *
  * Background tasks, notifications, plan mode, presets, and other enhancements.
  *
- * Tools: bash (overridden), bash_bg, jobs, job_decide, todo
- * Commands: /bg, /fg, /jobs, /todos, /tools, /plan, /bookmark, /unbookmark,
+ * Tools: bash (overridden), bash_bg, jobs, job_decide, task
+ * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /bookmark, /unbookmark,
  *           /footer, /handoff, /notifications, /preset, /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle)
@@ -13,54 +13,54 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { TauState } from "./state.js";
+import { TauState } from "./state.ts";
 import {
     cleanupStaleLogs,
     NORMAL_MODE_TOOLS,
     PLAN_MODE_TOOLS,
-} from "./utils.js";
+} from "./utils.ts";
 import {
     isSafeCommand,
     extractTodoItems,
     markCompletedSteps,
-} from "./plan-utils.js";
+} from "./plan-utils.ts";
 import {
     isAssistantMessage,
     getTextContent,
     updatePlanStatus,
-} from "./features/plan-mode.js";
+} from "./features/plan-mode.ts";
 import {
     startTitlebarSpinner,
     stopTitlebarSpinner,
     startAgentTimer,
     stopAgentTimer,
-} from "./features/titlebar.js";
+} from "./features/titlebar.ts";
 
 // Existing features
-import { registerBackgroundJobs } from "./features/background.js";
-import { registerBackgroundCommands } from "./features/background-commands.js";
-import { registerPlanMode } from "./features/plan-mode.js";
-import { registerTodo, reconstructTodoState } from "./features/todo.js";
+import { registerBackgroundJobs } from "./features/background.ts";
+import { registerBackgroundCommands } from "./features/background-commands.ts";
+import { registerPlanMode } from "./features/plan-mode.ts";
+import { registerTask, reconstructTaskState } from "./features/task.ts";
 import {
     registerToolsSelector,
     restoreToolsFromBranch,
-} from "./features/tools-selector.js";
+} from "./features/tools-selector.ts";
 import {
     registerNotifications,
     shouldNotify,
     sendNotification,
-} from "./features/notifications.js";
+} from "./features/notifications.ts";
 
 // New integrations
-import { registerBookmark } from "./features/bookmark.js";
-import { registerClaudeRules } from "./features/claude-rules.js";
-import { registerCustomFooter } from "./features/custom-footer.js";
-import { registerGitCheckpoint } from "./features/git-checkpoint.js";
-import { registerGithubAutocomplete } from "./features/github-autocomplete.js";
-import { registerHandoff } from "./features/handoff.js";
-import { registerPreset } from "./features/preset.js";
-import { registerSessionName } from "./features/session-name.js";
-import { registerSummarize } from "./features/summarize.js";
+import { registerBookmark } from "./features/bookmark.ts";
+import { registerClaudeRules } from "./features/claude-rules.ts";
+import { registerCustomFooter } from "./features/custom-footer.ts";
+import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
+import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
+import { registerHandoff } from "./features/handoff.ts";
+import { registerPreset } from "./features/preset.ts";
+import { registerSessionName } from "./features/session-name.ts";
+import { registerSummarize } from "./features/summarize.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
     registerBackgroundJobs(pi, state);
     registerBackgroundCommands(pi, state);
     registerPlanMode(pi, state);
-    registerTodo(pi, state);
+    registerTask(pi, state);
     registerToolsSelector(pi, state);
     registerNotifications(pi, state);
     registerBookmark(pi);
@@ -230,7 +230,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
     });
 
     pi.on("session_tree", async (_event, ctx) => {
-        reconstructTodoState(state, ctx);
+        reconstructTaskState(state, ctx);
         restoreToolsFromBranch(pi, state, ctx);
     });
 
@@ -344,8 +344,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
         }
         updatePlanStatus(state, ctx);
 
-        // Restore todo state
-        reconstructTodoState(state, ctx);
+        // Restore task state
+        reconstructTaskState(state, ctx);
 
         // Restore tools-selector state
         restoreToolsFromBranch(pi, state, ctx);

@@ -23,7 +23,7 @@ import {
     Text,
 } from "@earendil-works/pi-tui";
 
-interface Preset {
+export interface Preset {
     provider?: string;
     model?: string;
     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -31,7 +31,7 @@ interface Preset {
     instructions?: string;
 }
 
-interface PresetsConfig {
+export interface PresetsConfig {
     [name: string]: Preset;
 }
 
@@ -41,7 +41,7 @@ interface OriginalState {
     tools: string[];
 }
 
-function loadPresets(cwd: string): PresetsConfig {
+export function loadPresets(cwd: string): PresetsConfig {
     const globalPath = join(getAgentDir(), "presets.json");
     const projectPath = join(cwd, ".pi", "presets.json");
 
@@ -75,7 +75,7 @@ function loadPresets(cwd: string): PresetsConfig {
     return { ...globalPresets, ...projectPresets };
 }
 
-function buildPresetDescription(preset: Preset): string {
+export function buildPresetDescription(preset: Preset): string {
     const parts: string[] = [];
 
     if (preset.provider && preset.model) {

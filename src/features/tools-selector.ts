@@ -12,7 +12,7 @@ import {
     type SettingItem,
     SettingsList,
 } from "@earendil-works/pi-tui";
-import type { TauState } from "../state.js";
+import type { TauState } from "../state.ts";
 
 // ─── State persistence ──────────────────────────────────────────────
 
