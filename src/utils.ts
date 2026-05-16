@@ -12,7 +12,7 @@ import {
     unlinkSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import type { BackgroundJob, JobStatus } from "./types.js";
+import type { BackgroundJob, JobStatus } from "./types.ts";
 
 // ─── Configuration constants ────────────────────────────────────────
 

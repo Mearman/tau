@@ -6,9 +6,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { TauState } from "../state.js";
-import type { BackgroundJob, UiContext } from "../types.js";
-import { backgroundProcess, updateWidget } from "./background.js";
+import type { TauState } from "../state.ts";
+import type { BackgroundJob, UiContext } from "../types.ts";
+import { backgroundProcess, updateWidget } from "./background.ts";
 import {
     MAX_OUTPUT_PREVIEW_CHARS,
     createJobDonePromise,
@@ -16,7 +16,7 @@ import {
     killProcessGroup,
     markJobTerminal,
     readOutputTail,
-} from "../utils.js";
+} from "../utils.ts";
 
 // ── Background shortcut handler (Ctrl+B) ────────────────────────────
 

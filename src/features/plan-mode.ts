@@ -8,9 +8,9 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import type { TauState } from "../state.js";
-import { NORMAL_MODE_TOOLS, PLAN_MODE_TOOLS } from "../utils.js";
-import { markCompletedSteps } from "../plan-utils.js";
+import type { TauState } from "../state.ts";
+import { NORMAL_MODE_TOOLS, PLAN_MODE_TOOLS } from "../utils.ts";
+import { markCompletedSteps } from "../plan-utils.ts";
 
 function isAssistantMessage(m: {
     role: string;

@@ -3,13 +3,13 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { TauState } from "../state.js";
-import { formatDuration } from "../utils.js";
+import type { TauState } from "../state.ts";
+import { formatDuration } from "../utils.ts";
 import path from "node:path";
 
 const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-function getTitleBase(pi: ExtensionAPI): string {
+export function getTitleBase(pi: ExtensionAPI): string {
     const cwd = path.basename(process.cwd());
     const session = pi.getSessionName();
     return session ? `π - ${session} - ${cwd}` : `π - ${cwd}`;

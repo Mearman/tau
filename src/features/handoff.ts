@@ -38,7 +38,7 @@ Files involved:
 ## Task
 [Clear description of what to do next based on user's goal]`;
 
-function entryToMessage(entry: SessionEntry): AgentMessage | undefined {
+export function entryToMessage(entry: SessionEntry): AgentMessage | undefined {
     if (entry.type === "message") {
         return entry.message;
     }
@@ -53,7 +53,7 @@ function entryToMessage(entry: SessionEntry): AgentMessage | undefined {
     return undefined;
 }
 
-function getHandoffMessages(branch: SessionEntry[]): AgentMessage[] {
+export function getHandoffMessages(branch: SessionEntry[]): AgentMessage[] {
     let compactionIndex = -1;
     for (let i = branch.length - 1; i >= 0; i--) {
         if (branch[i].type === "compaction") {
