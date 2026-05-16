@@ -82,6 +82,15 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 - Opens an editor to review/edit the prompt before creating a new session
 - Preserves parent session linkage
 
+### Tasks
+
+- `task` tool with nesting, links, and multi-status tracking
+- Five statuses: `todo`, `in-progress`, `done`, `blocked`, `cancelled`
+- Nested tasks via `parentId` — tree rendering in `/tasks` UI
+- Directional links: `blocks`, `depends-on`, `related`
+- Cycle detection on `move`, cascade removal, link cleanup
+- `/tasks` command for interactive tree view
+
 ### Conversation Summary
 
 - `/summarize` — generates a structured summary of the current conversation using an LLM
@@ -95,7 +104,7 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 | `bash_bg` | Start a command in the background immediately |
 | `jobs` | `list`, `output`, `kill`, or `attach` to background jobs |
 | `job_decide` | Decide what to do with a timed-out background job |
-| `todo` | Manage a todo list — `list`, `add`, `toggle`, `clear` |
+| `task` | Manage tasks with nesting, links, and status — `list`, `add`, `update`, `remove`, `move`, `link`, `unlink` |
 
 ## Commands
 
@@ -104,7 +113,7 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 | `/bg` | Same as Ctrl+B — background bash/agent or resume |
 | `/fg` | Attach to a background job, optionally with `--snapshot` |
 | `/jobs` | Open task management interface |
-| `/todos` | Show all todos on the current branch |
+| `/tasks` | Show all tasks on the current branch |
 | `/tools` | Enable/disable tools |
 | `/plan` | Toggle plan mode (read-only exploration) |
 | `/notifications` | Configure notification settings |
@@ -139,7 +148,7 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 src/
   index.ts              Entry point — creates TauState, registers all features, cross-cutting event handlers
   state.ts              TauState class — shared mutable state
-  types.ts              Shared type definitions (BackgroundJob, RunningProcess, Todo, etc.)
+  types.ts              Shared type definitions (BackgroundJob, RunningProcess, Task, etc.)
   utils.ts              Shared utilities (formatDuration, notify, killProcessGroup, etc.)
   plan-utils.ts         Plan-mode pure functions (step extraction, safe command checking)
   features/
@@ -147,7 +156,7 @@ src/
     background-commands.ts  /bg, /fg, /jobs commands, Ctrl+B/X/J shortcuts, task UI
     titlebar.ts         Braille spinner and elapsed timer
     plan-mode.ts        /plan, Ctrl+Alt+P, plan execution tracking
-    todo.ts             todo tool, /todos command
+    task.ts             task tool, /tasks command (nesting, links, status)
     tools-selector.ts   /tools command, state persistence
     notifications.ts    /notifications, agent_end notification, DnD support
     bookmark.ts         /bookmark, /unbookmark
