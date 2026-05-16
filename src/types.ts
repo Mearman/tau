@@ -57,17 +57,35 @@ export interface UiContext {
     };
 }
 
-// ─── Todo ───────────────────────────────────────────────────────────
+// ─── Task ───────────────────────────────────────────────────────────
 
-export interface Todo {
-    id: number;
-    text: string;
-    done: boolean;
+export type TaskStatus =
+    | "todo"
+    | "in-progress"
+    | "done"
+    | "blocked"
+    | "cancelled";
+
+export type LinkType = "blocks" | "depends-on" | "related";
+
+export interface TaskLink {
+    targetId: number;
+    type: LinkType;
 }
 
-export interface TodoDetails {
-    action: "list" | "add" | "toggle" | "clear";
-    todos: Todo[];
+export interface Task {
+    id: number;
+    title: string;
+    description?: string;
+    status: TaskStatus;
+    parentId?: number;
+    links: TaskLink[];
+    createdAt: number;
+}
+
+export interface TaskDetails {
+    action: "list" | "add" | "update" | "remove" | "move" | "link" | "unlink";
+    tasks: Task[];
     nextId: number;
     error?: string;
 }
