@@ -202,41 +202,6 @@ export function cleanupStaleLogs(): void {
     }
 }
 
-// ─── Terminal notifications ─────────────────────────────────────────
-
-function windowsToastScript(title: string, body: string): string {
-    const type = "Windows.UI.Notifications";
-    const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
-    const template = `[${type}.ToastTemplateType]::ToastText01`;
-    const toast = `[${type}.ToastNotification]::new($xml)`;
-    return [
-        `${mgr} > $null`,
-        `$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
-        `$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('${body}')) > $null`,
-        `[${type}.ToastNotificationManager]::CreateToastNotifier('${title}').Show(${toast})`,
-    ].join("; ");
-}
-
-export function notify(
-    title: string,
-    body: string,
-    persistent?: boolean
-): void {
-    if (process.env.WT_SESSION) {
-        execFile("powershell.exe", [
-            "-NoProfile",
-            "-Command",
-            windowsToastScript(title, body),
-        ]);
-    } else if (process.env.KITTY_WINDOW_ID) {
-        const urgency = persistent ? "1" : "0";
-        process.stdout.write(`\x1b]99;i=1:d=${urgency};${title}\x1b\\`);
-        process.stdout.write(`\x1b]99;i=1:p=body;${body}\x1b\\`);
-    } else {
-        process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
-    }
-}
-
 // ─── Notification helpers ───────────────────────────────────────────
 
 export function truncateNotificationBody(text: string): string {

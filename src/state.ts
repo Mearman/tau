@@ -38,6 +38,11 @@ export class TauState {
     dndActive = false;
     dndLastCheck = 0;
 
+    /** IDs of enabled notification providers. */
+    enabledNotificationProviders = new Set<string>(["terminal"]);
+    /** Per-provider credential/settings storage. */
+    notificationProviderConfigs: Record<string, Record<string, string>> = {};
+
     // ── Task ──────────────────────────────────────────────────────────
 
     tasks: Task[] = [];
