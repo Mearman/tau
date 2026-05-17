@@ -360,11 +360,25 @@ After completing a step, include a [DONE:n] tag in your response.`,
                     | {
                           persistent?: boolean;
                           respectDnd?: boolean;
+                          enabledProviders?: string[];
+                          providerConfigs?: Record<
+                              string,
+                              Record<string, string>
+                          >;
                       }
                     | undefined;
                 if (data) {
                     state.notificationPersistent = data.persistent ?? false;
                     state.notificationRespectDnd = data.respectDnd ?? true;
+                    if (data.enabledProviders) {
+                        state.enabledNotificationProviders = new Set(
+                            data.enabledProviders
+                        );
+                    }
+                    if (data.providerConfigs) {
+                        state.notificationProviderConfigs =
+                            data.providerConfigs;
+                    }
                 }
                 break;
             }
@@ -468,7 +482,12 @@ After completing a step, include a [DONE:n] tag in your response.`,
         // ── Notification ──────────────────────────────────────────────
         const doNotify = await shouldNotify(state);
         if (doNotify) {
-            sendNotification(state, event.messages);
+            const sessionName = pi.getSessionName();
+            const cwdBasename = ctx.cwd.split("/").pop() ?? "";
+            const title = sessionName
+                ? `Pi · ${sessionName}`
+                : `Pi · ${cwdBasename}`;
+            sendNotification(state, event.messages, title);
         }
     });
 
