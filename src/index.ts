@@ -61,6 +61,7 @@ import { registerHandoff } from "./features/handoff.ts";
 import { registerPreset } from "./features/preset.ts";
 import { registerSessionName } from "./features/session-name.ts";
 import { registerSummarize } from "./features/summarize.ts";
+import { registerWebBrowse } from "./features/web-browse/index.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -82,6 +83,7 @@ export default function (pi: ExtensionAPI) {
     registerPreset(pi);
     registerSessionName(pi);
     registerSummarize(pi);
+    registerWebBrowse(pi);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 

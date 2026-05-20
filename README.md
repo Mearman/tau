@@ -96,6 +96,16 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 - `/summarize` — generates a structured summary of the current conversation using an LLM
 - Renders as Markdown in a custom UI
 
+### Web Browse
+
+- **chrome_list** — List open Chrome tabs across all profiles (bridge, CDP, or AppleScript)
+- **web_browse** — Fetch page content as text, Markdown, or structured JSON
+- **web_screenshot** — Capture full-page or viewport screenshots
+- **web_interact** — Multi-step page interaction (click, fill, scroll, evaluate JS)
+- Four browser modes: **bridge** (Chrome extension, zero prompts), **isolated** (headless Chromium), **cdp** (DevTools Protocol), **applescript** (read-only macOS)
+- Playwright-core is optional — only needed for isolated and CDP modes
+- Chrome extension + native messaging bridge included for zero-prompt tab access
+
 ## Tools
 
 | Tool | Purpose |
@@ -105,6 +115,10 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 | `jobs` | `list`, `output`, `kill`, or `attach` to background jobs |
 | `job_decide` | Decide what to do with a timed-out background job |
 | `task` | Manage tasks with nesting, links, and status — `list`, `add`, `update`, `remove`, `move`, `link`, `unlink` |
+| `chrome_list` | List open Chrome tabs (bridge, CDP, or AppleScript) |
+| `web_browse` | Fetch page content as text, Markdown, or structured JSON |
+| `web_screenshot` | Capture page screenshots |
+| `web_interact` | Multi-step page interaction (click, fill, scroll, evaluate) |
 
 ## Commands
 
