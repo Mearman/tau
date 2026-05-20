@@ -5,7 +5,7 @@ import eslintPluginPrettier from "eslint-plugin-prettier";
 import { configs } from "typescript-eslint";
 
 export default defineConfig(
-    { ignores: ["dist/", "node_modules/"] },
+    { ignores: ["dist/", "node_modules/", "bridge/"] },
 
     // All TypeScript files — type-checked via tsconfig.json
     {
@@ -16,7 +16,9 @@ export default defineConfig(
         ],
         languageOptions: {
             parserOptions: {
-                projectService: true,
+                projectService: {
+                    allowDefaultProject: ["bridge/*.ts"],
+                },
                 tsconfigRootDir: import.meta.dirname,
             },
         },

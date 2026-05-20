@@ -1,0 +1,9 @@
+{
+  "name": "io.pi.chrome_bridge",
+  "description": "Pi Chrome Bridge — native messaging host for agent↔Chrome communication",
+  "path": "/Users/joe/.pi/agent/extensions/web-browse/bridge/pi-chrome-bridge",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://gkhnaechfomopobkjgdhmfkoblnljjfc/"
+  ]
+}

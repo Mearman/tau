@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pi Chrome Bridge — Native Messaging Host launcher
+# Chrome launches this script when the extension calls chrome.runtime.connectNative().
+# # It starts the native messaging host which communicates with Chrome
+
+BRIDGE_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Set PATH for launchd (which doesn't inherit shell PATH)
+export PATH="/Users/joe/.local/share/mise/installs/node/26.1.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Use npx tsx to run the TypeScript bridge directly
+exec npx tsx "$BRIDGE_DIR/bridge.ts" "$@"
