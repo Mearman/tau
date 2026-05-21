@@ -13,6 +13,7 @@ const config: UserConfig = {
                 "notify",
                 "status",
                 "titlebar",
+                "loop",
                 "plan",
                 "task",
                 "todo",
