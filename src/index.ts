@@ -59,6 +59,7 @@ import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
 import { registerHandoff } from "./features/handoff.ts";
 import { registerPreset } from "./features/preset.ts";
+import { registerLoop } from "./features/loop.ts";
 import { registerSessionName } from "./features/session-name.ts";
 import { registerSummarize } from "./features/summarize.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
@@ -81,6 +82,7 @@ export default function (pi: ExtensionAPI) {
     registerGithubAutocomplete(pi);
     registerHandoff(pi);
     registerPreset(pi);
+    registerLoop(pi);
     registerSessionName(pi);
     registerSummarize(pi);
     registerWebBrowse(pi);
