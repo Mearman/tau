@@ -210,7 +210,7 @@ export function registerAgentBackground(
             const promptFile = `${tmpdir()}/pi-bg-prompt-${jobId}.md`;
             writeFileSync(promptFile, promptContent);
 
-            const spawnArgs = ["-p", "--no-session", `@${promptFile}`];
+            const spawnArgs = ["-p", "--mode", "text", `@${promptFile}`];
 
             const proc = spawn("pi", spawnArgs, {
                 cwd: params.cwd ?? ctx.cwd,

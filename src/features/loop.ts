@@ -441,7 +441,9 @@ export function registerLoop(pi: ExtensionAPI): void {
 
     function emitTick(entry: LoopEntry): void {
         entry.lastTickAt = new Date();
-        pi.sendUserMessage(buildTickMessage(entry.prompt, entry.lastTickAt));
+        pi.sendUserMessage(buildTickMessage(entry.prompt, entry.lastTickAt), {
+            deliverAs: "followUp",
+        });
     }
 
     function startLoop(parsed: ParsedLoop): LoopEntry {
@@ -642,7 +644,7 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
             const msg = buildTickMessage(loop.prompt, loop.lastTickAt);
             loop.pendingTick = setTimeout(() => {
                 loop.pendingTick = null;
-                pi.sendUserMessage(msg);
+                pi.sendUserMessage(msg, { deliverAs: "followUp" });
             }, TICK_DELAY_MS);
         }
     });

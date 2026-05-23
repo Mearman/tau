@@ -134,7 +134,8 @@ export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
         );
 
         pi.sendUserMessage(
-            `<callback id="${cb.id}" source="${cb.source}" elapsed="${elapsed}">\n${cb.message}\n</callback>`
+            `<callback id="${cb.id}" source="${cb.source}" elapsed="${elapsed}">\n${cb.message}\n</callback>`,
+            { deliverAs: "followUp" }
         );
 
         // Remove from map after firing
@@ -297,9 +298,12 @@ export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
         sessionId = ctx.sessionManager.getSessionId();
         nextId = 1;
 
-        // Restore pending callbacks from session entries
+        // Restore pending callbacks from the latest session entry.
+        // Iterate in reverse to find the most recent callbacks-state
+        // entry, which reflects the latest state (fired callbacks removed).
         const entries = ctx.sessionManager.getEntries();
-        for (const entry of entries) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
             if (
                 entry.type === "custom" &&
                 entry.customType === "callbacks-state"
