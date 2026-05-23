@@ -66,6 +66,7 @@ import { registerSummarize } from "./features/summarize.ts";
 import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
+import { registerCallbacks } from "./features/callbacks.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -92,6 +93,7 @@ export default function (pi: ExtensionAPI) {
     registerContext(pi);
     registerWebBrowse(pi);
     registerReloadTool(pi, state);
+    registerCallbacks(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
