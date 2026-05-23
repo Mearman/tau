@@ -614,11 +614,15 @@ export function renderGridLines(
 ): string[] {
     const margin = 2;
     const cellChars = 2; // each cell is ██ (2 chars wide)
+    // Double-width cells make the grid ~2× as wide (in char-widths) as the
+    // column count suggests. Half-blocks give 2 logical rows per terminal line
+    // but each line is ~2 char-widths tall. For a square appearance we need
+    // roughly logicalRows ≈ cols × 2.
     const cols = Math.max(
         10,
         Math.min(20, Math.floor((termWidth - margin) / cellChars))
     );
-    const logicalRows = data.contextWindow >= 1_000_000 ? 20 : 12;
+    const logicalRows = data.contextWindow >= 1_000_000 ? cols * 3 : cols * 2;
     const totalPixels = cols * logicalRows;
 
     const pixels = buildPixels(data, cols, logicalRows);
