@@ -76,15 +76,26 @@ export function registerReloadTool(pi: ExtensionAPI, state: TauState): void {
                 };
             }
 
-            await state.commandContextReload();
+            // Defer the reload until the agent is truly idle.
+            // ctx.reload() shows a warning but resolves (doesn't reject) when
+            // the agent is busy, so polling doesn't work. Instead, schedule
+            // the reload with a generous delay that covers tool execution,
+            // agent response streaming, and TUI rendering.
+            const doReload = state.commandContextReload;
+            setTimeout(() => {
+                doReload().catch(() => {
+                    /* reload may reject if session is shutting down */
+                });
+            }, 3000);
 
             return {
                 content: [
                     {
                         type: "text" as const,
                         text:
-                            "Reloaded keybindings, extensions, skills, prompts, and themes. " +
-                            "All configuration changes are now active.",
+                            "Reload scheduled — will fire after the current response " +
+                            "completes. All configuration changes will be active once " +
+                            "the reload finishes.",
                     },
                 ],
                 details: undefined,
