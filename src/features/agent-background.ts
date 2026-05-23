@@ -210,7 +210,20 @@ export function registerAgentBackground(
             const promptFile = `${tmpdir()}/pi-bg-prompt-${jobId}.md`;
             writeFileSync(promptFile, promptContent);
 
-            const spawnArgs = ["-p", "--mode", "text", `@${promptFile}`];
+            // Pass the current model to the spawned pi so it uses the same
+            // provider/model rather than falling back to the default config.
+            // Use the provider/id format so pi can resolve the correct provider.
+            const model = ctx.model;
+            const modelArg = model
+                ? `${model.provider}/${model.id}`
+                : undefined;
+            const spawnArgs = [
+                "-p",
+                "--mode",
+                "text",
+                ...(modelArg ? ["--model", modelArg] : []),
+                `@${promptFile}`,
+            ];
 
             const proc = spawn("pi", spawnArgs, {
                 cwd: params.cwd ?? ctx.cwd,
