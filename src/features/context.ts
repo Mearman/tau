@@ -614,12 +614,11 @@ export function renderGridLines(
 ): string[] {
     const margin = 2;
     const cellChars = 2; // each cell is ██ (2 chars wide)
-    const availCols = Math.max(
+    const cols = Math.max(
         10,
-        Math.floor((termWidth - margin) / cellChars)
+        Math.min(20, Math.floor((termWidth - margin) / cellChars))
     );
-    const logicalRows = data.contextWindow >= 1_000_000 ? 10 : 6;
-    const cols = Math.min(availCols, 40);
+    const logicalRows = data.contextWindow >= 1_000_000 ? 20 : 12;
     const totalPixels = cols * logicalRows;
 
     const pixels = buildPixels(data, cols, logicalRows);
