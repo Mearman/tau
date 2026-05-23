@@ -28,6 +28,7 @@ import type {
     ExtensionCommandContext,
     SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { Container, SelectList, Spacer, Text } from "@earendil-works/pi-tui";
 
 // --- Constants ---
 
@@ -644,6 +645,159 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
         }
     });
 
+    // --- Interactive loop manager TUI ---
+
+    /**
+     * Open the interactive loop manager overlay.
+     *
+     * Shows all running loops with selectable actions per loop.
+     * Keyboard: Up/Down navigate, Enter to act on a loop, Escape to close.
+     */
+    async function showLoopManager(
+        ctx: ExtensionCommandContext
+    ): Promise<void> {
+        if (loops.length === 0) {
+            ctx.ui.notify("No active loops.", "info");
+            return;
+        }
+
+        await ctx.ui.custom((_tui, theme, _kb, done) => {
+            const container = new Container();
+
+            // Header
+            container.addChild(
+                new Text(
+                    theme.fg(
+                        "accent",
+                        theme.bold(`Active Loops (${loops.length})`)
+                    ),
+                    0,
+                    0
+                )
+            );
+            container.addChild(new Spacer(1));
+
+            // Build select items — one per loop, plus a "Stop All" option
+            const loopItems = loops.map((loop) => {
+                const elapsed = loop.lastTickAt
+                    ? formatDuration(Date.now() - loop.lastTickAt.getTime())
+                    : "never";
+                const modeLabel =
+                    loop.mode.kind === "count"
+                        ? `${loop.remaining}/${loop.mode.kind === "count" ? loop.mode.count : 0}`
+                        : loop.humanDescription;
+                const completionLabel =
+                    loop.completionPromise !== null ? " · auto-stop" : "";
+                const tickLabel = `${loop.ticksFired} ticks · last ${elapsed}${completionLabel}`;
+
+                return {
+                    value: String(loop.id),
+                    label: loop.prompt || "(no prompt)",
+                    description: `${modeLabel} · ${tickLabel}`,
+                };
+            });
+
+            loopItems.push({
+                value: "stop-all",
+                label: "Stop all loops",
+                description: `${loops.length} active loop(s)`,
+            });
+
+            loopItems.push({
+                value: "done",
+                label: "Close",
+                description: "Escape",
+            });
+
+            const selectList = new SelectList(
+                loopItems,
+                Math.min(loopItems.length + 2, 15),
+                {
+                    selectedPrefix: (text: string) => theme.fg("accent", text),
+                    selectedText: (text: string) => theme.bold(text),
+                    description: (text: string) => theme.fg("dim", text),
+                    scrollInfo: (text: string) => theme.fg("muted", text),
+                    noMatch: (text: string) => theme.fg("muted", text),
+                }
+            );
+
+            selectList.onSelect = (item) => {
+                if (item.value === "done") {
+                    done(undefined);
+                    return;
+                }
+                if (item.value === "stop-all") {
+                    const count = stopAll();
+                    done(undefined);
+                    ctx.ui.notify(`Stopped ${count} loop(s).`, "info");
+                    return;
+                }
+                // Stop a specific loop
+                const id = parseInt(item.value, 10);
+                if (removeLoop(id)) {
+                    // Re-render the list
+                    if (loops.length === 0) {
+                        done(undefined);
+                        ctx.ui.notify("All loops stopped.", "info");
+                        return;
+                    }
+                    // Remove the stopped item from the list
+                    const idx = loopItems.findIndex(
+                        (li) => li.value === item.value
+                    );
+                    if (idx !== -1) loopItems.splice(idx, 1);
+                    selectList.setFilter("");
+                    container.invalidate();
+                    ctx.ui.notify(`Loop #${id} stopped.`, "info");
+                }
+            };
+
+            selectList.onCancel = () => {
+                done(undefined);
+            };
+
+            container.addChild(selectList);
+
+            return {
+                render(width: number) {
+                    return container.render(width);
+                },
+                invalidate() {
+                    container.invalidate();
+                },
+                handleInput(data: string) {
+                    selectList.handleInput(data);
+                },
+            };
+        });
+    }
+
+    // --- Keyboard shortcut ---
+
+    pi.registerShortcut("ctrl+l", {
+        description: "Open loop manager",
+        handler: async (_ctx) => {
+            // Shortcuts receive ExtensionContext, not ExtensionCommandContext.
+            // We can't open the full TUI from here without a command context.
+            // Instead, show a notification summary.
+            if (loops.length === 0) {
+                _ctx.ui.notify(
+                    "No active loops. Use /loop to start one.",
+                    "info"
+                );
+                return;
+            }
+            const lines = loops.map(
+                (l) =>
+                    `  #${l.id}: "${l.prompt || "(no prompt)"}" — ${l.humanDescription} (${l.ticksFired} ticks)`
+            );
+            _ctx.ui.notify(
+                `Active loops:\n${lines.join("\n")}\nUse /loop list to manage.`,
+                "info"
+            );
+        },
+    });
+
     // --- Command registration ---
 
     pi.registerCommand("loop", {
@@ -653,15 +807,7 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
             const trimmed = args.trim().toLowerCase();
 
             if (trimmed === "list") {
-                if (loops.length === 0) {
-                    ctx.ui.notify("No active loops.", "info");
-                } else {
-                    const lines = loops.map(
-                        (l) =>
-                            `  #${l.id}: "${l.prompt || "(no prompt)"}" — ${l.humanDescription} (${l.ticksFired} ticks)`
-                    );
-                    ctx.ui.notify(`Active loops:\n${lines.join("\n")}`, "info");
-                }
+                await showLoopManager(ctx);
                 return;
             }
 
