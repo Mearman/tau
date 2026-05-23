@@ -16,16 +16,20 @@
  *   - `estimateTokens()` — chars/4 heuristic per message
  */
 
+import { homedir } from "node:os";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
     SessionEntry,
+    SlashCommandInfo,
     ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import {
     DEFAULT_COMPACTION_SETTINGS,
     estimateTokens,
+    getAgentDir,
+    loadProjectContextFiles,
 } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, matchesKey } from "@earendil-works/pi-tui";
 
@@ -60,6 +64,16 @@ interface ToolBreakdown {
     resultTokens: number;
 }
 
+export interface ContextFileInfo {
+    path: string;
+    tokens: number;
+}
+
+export interface SkillDetail {
+    name: string;
+    tokens: number;
+}
+
 export interface ContextData {
     categories: ContextCategory[];
     totalTokens: number;
@@ -67,6 +81,8 @@ export interface ContextData {
     percent: number | null;
     model: string;
     toolDefinitions: { name: string; tokens: number }[];
+    contextFiles: ContextFileInfo[];
+    skills: SkillDetail[];
     messageBreakdown: {
         toolCallTokens: number;
         toolResultTokens: number;
@@ -133,13 +149,23 @@ function blockText(block: ContentBlock): string {
 
 // ─── Core analysis (mirrors CC analyzeContextUsage) ──────────────────
 
+function displayPath(filePath: string): string {
+    const home = homedir();
+    if (filePath.startsWith(home + "/")) {
+        return "~" + filePath.slice(home.length);
+    }
+    return filePath;
+}
+
 export function analyseContext(
     entries: SessionEntry[],
     systemPrompt: string,
     tools: ToolInfo[],
     totalTokens: number | null,
     contextWindow: number,
-    modelName: string
+    modelName: string,
+    contextFilesInput?: Array<{ path: string; content: string }>,
+    skillCommands?: SlashCommandInfo[]
 ): ContextData {
     const categories: ContextCategory[] = [];
     const toolCallMap = new Map<
@@ -148,7 +174,40 @@ export function analyseContext(
     >();
 
     // ── 1. System prompt ────────────────────────────────────────────
-    const systemTokens = roughTokens(systemPrompt);
+    // The full system prompt includes context files and skills baked in.
+    // We count the base system prompt by subtracting those contributions.
+    let contextFileTokens = 0;
+    const contextFiles: ContextFileInfo[] = [];
+    if (contextFilesInput) {
+        for (const file of contextFilesInput) {
+            const tokens = roughTokens(file.content);
+            contextFileTokens += tokens;
+            contextFiles.push({ path: file.path, tokens });
+        }
+    }
+    // Sort by tokens descending
+    contextFiles.sort((a, b) => b.tokens - a.tokens);
+
+    // Skills contribution within the system prompt
+    let skillFrontmatterTokens = 0;
+    const skills: SkillDetail[] = [];
+    if (skillCommands) {
+        for (const cmd of skillCommands) {
+            // Estimate from name + description (frontmatter only, not full
+            // skill body — matches CC's estimateSkillFrontmatterTokens)
+            const text = [cmd.name, cmd.description].filter(Boolean).join(" ");
+            const tokens = roughTokens(text);
+            skillFrontmatterTokens += tokens;
+            skills.push({ name: cmd.name, tokens });
+        }
+    }
+    skills.sort((a, b) => b.tokens - a.tokens);
+
+    // Base system prompt = full prompt minus context files and skills
+    const systemTokens = Math.max(
+        0,
+        roughTokens(systemPrompt) - contextFileTokens - skillFrontmatterTokens
+    );
     if (systemTokens > 0) {
         categories.push({
             name: "System prompt",
@@ -157,7 +216,25 @@ export function analyseContext(
         });
     }
 
-    // ── 2. Tool definitions ─────────────────────────────────────────
+    // ── 2. Context files (mirrors CC "Memory files") ────────────────
+    if (contextFileTokens > 0) {
+        categories.push({
+            name: "Context files",
+            tokens: contextFileTokens,
+            colour: "success",
+        });
+    }
+
+    // ── 3. Skills (mirrors CC "Skills") ─────────────────────────────
+    if (skillFrontmatterTokens > 0) {
+        categories.push({
+            name: "Skills",
+            tokens: skillFrontmatterTokens,
+            colour: "warning",
+        });
+    }
+
+    // ── 4. Tool definitions ─────────────────────────────────────────
     let toolDefTotal = 0;
     const toolDefinitions: { name: string; tokens: number }[] = [];
     for (const tool of tools) {
@@ -171,11 +248,11 @@ export function analyseContext(
         categories.push({
             name: "Tools",
             tokens: toolDefTotal,
-            colour: "warning",
+            colour: "dim",
         });
     }
 
-    // ── 3. Message breakdown (mirrors CC approximateMessageTokens) ──
+    // ── 5. Message breakdown (mirrors CC approximateMessageTokens) ──
     let toolCallTokens = 0;
     let toolResultTokens = 0;
     let assistantTextTokens = 0;
@@ -326,6 +403,8 @@ export function analyseContext(
                 : null,
         model: modelName,
         toolDefinitions,
+        contextFiles,
+        skills,
         messageBreakdown: {
             toolCallTokens,
             toolResultTokens,
@@ -343,6 +422,8 @@ export function analyseContext(
 const NEAR_CAPACITY_PERCENT = 80;
 const LARGE_TOOL_RESULT_PERCENT = 15;
 const LARGE_TOOL_RESULT_TOKENS = 10_000;
+const CONTEXT_FILES_HIGH_PERCENT = 5;
+const CONTEXT_FILES_HIGH_TOKENS = 5_000;
 
 export function generateSuggestions(data: ContextData): ContextSuggestion[] {
     const suggestions: ContextSuggestion[] = [];
@@ -371,6 +452,32 @@ export function generateSuggestions(data: ContextData): ContextSuggestion[] {
             detail: getToolSpecificAdvice(tool.name),
             savingsTokens: Math.floor(total * 0.3),
         });
+    }
+
+    // Context files bloat (mirrors CC checkMemoryBloat)
+    if (data.contextFiles.length > 0) {
+        const totalContextTokens = data.contextFiles.reduce(
+            (sum, f) => sum + f.tokens,
+            0
+        );
+        const ctxPct = (totalContextTokens / data.contextWindow) * 100;
+        if (
+            ctxPct >= CONTEXT_FILES_HIGH_PERCENT &&
+            totalContextTokens >= CONTEXT_FILES_HIGH_TOKENS
+        ) {
+            const largest = data.contextFiles
+                .slice(0, 3)
+                .map(
+                    (f) => `${displayPath(f.path)} (${formatTokens(f.tokens)})`
+                )
+                .join(", ");
+            suggestions.push({
+                severity: "info",
+                title: `Context files using ${formatTokens(totalContextTokens)} tokens (${ctxPct.toFixed(0)}%)`,
+                detail: `Largest: ${largest}. Review and prune stale entries.`,
+                savingsTokens: Math.floor(totalContextTokens * 0.3),
+            });
+        }
     }
 
     // Autocompact disabled at 50%+
@@ -643,6 +750,40 @@ class ContextViewComponent implements Component {
             lines.push(leg);
         }
 
+        // ── Context files detail ───────────────────────────────────
+        if (data.contextFiles.length > 0) {
+            lines.push("");
+            lines.push(theme.fg("dim", "Context files:"));
+            for (const file of data.contextFiles) {
+                lines.push(
+                    theme.fg(
+                        "dim",
+                        `  └ ${displayPath(file.path)}: ${formatTokens(file.tokens)} tokens`
+                    )
+                );
+            }
+        }
+
+        // ── Skills detail ──────────────────────────────────────────────
+        if (data.skills.length > 0) {
+            lines.push("");
+            lines.push(theme.fg("dim", `Skills (${data.skills.length}):`));
+            const topSkills = data.skills.slice(0, 8);
+            for (const skill of topSkills) {
+                lines.push(
+                    theme.fg(
+                        "dim",
+                        `  └ ${skill.name}: ${formatTokens(skill.tokens)} tokens`
+                    )
+                );
+            }
+            if (data.skills.length > 8) {
+                lines.push(
+                    theme.fg("dim", `  … and ${data.skills.length - 8} more`)
+                );
+            }
+        }
+
         // ── Tool definitions detail ─────────────────────────────────
         if (data.toolDefinitions.length > 0) {
             lines.push("");
@@ -750,6 +891,22 @@ export function registerContext(pi: ExtensionAPI): void {
                     ?.contextWindow ??
                 200_000;
 
+            // Discover context files (AGENTS.md, CLAUDE.md, etc.)
+            let contextFiles: Array<{ path: string; content: string }> = [];
+            try {
+                contextFiles = loadProjectContextFiles({
+                    cwd: ctx.cwd,
+                    agentDir: getAgentDir(),
+                });
+            } catch {
+                // Context file discovery may fail in some environments
+            }
+
+            // Discover skills from slash commands
+            const skillCommands = pi
+                .getCommands()
+                .filter((cmd) => cmd.source === "skill");
+
             if (!ctx.hasUI) {
                 // Non-interactive fallback (mirrors CC contextNonInteractive)
                 if (!usage) {
@@ -776,7 +933,9 @@ export function registerContext(pi: ExtensionAPI): void {
                 tools,
                 usage?.tokens ?? null,
                 contextWindow,
-                modelName
+                modelName,
+                contextFiles,
+                skillCommands
             );
 
             const suggestions = generateSuggestions(data);
