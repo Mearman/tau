@@ -533,3 +533,51 @@ void describe("startTimeoutTimer", () => {
         clearTimeout(timer);
     });
 });
+
+// ─── Command policies ─────────────────────────────────────────────────
+
+import { isAutoBackgroundAllowed, detectBlockedSleep } from "../utils.ts";
+
+void describe("isAutoBackgroundAllowed", () => {
+    void it("allows npm test", () => {
+        assert.equal(isAutoBackgroundAllowed("npm test"), true);
+    });
+
+    void it("allows make build", () => {
+        assert.equal(isAutoBackgroundAllowed("make build"), true);
+    });
+
+    void it("rejects sleep", () => {
+        assert.equal(isAutoBackgroundAllowed("sleep 30"), false);
+    });
+
+    void it("allows commands starting with other names", () => {
+        assert.equal(isAutoBackgroundAllowed("echo hello"), true);
+    });
+});
+
+void describe("detectBlockedSleep", () => {
+    void it("blocks sleep 10", () => {
+        assert.equal(detectBlockedSleep("sleep 10"), "sleep 10");
+    });
+
+    void it("allows sleep 1", () => {
+        assert.equal(detectBlockedSleep("sleep 1"), null);
+    });
+
+    void it("allows sleep 0.5", () => {
+        assert.equal(detectBlockedSleep("sleep 0.5"), null);
+    });
+
+    void it("returns null for make build", () => {
+        assert.equal(detectBlockedSleep("make build"), null);
+    });
+
+    void it("blocks leading sleep in compound command", () => {
+        assert.equal(detectBlockedSleep("sleep 5 && echo done"), "sleep 5");
+    });
+
+    void it("allows make followed by sleep", () => {
+        assert.equal(detectBlockedSleep("make && sleep 5"), null);
+    });
+});
