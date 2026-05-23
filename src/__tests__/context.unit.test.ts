@@ -99,10 +99,147 @@ void describe("analyseContext", () => {
         assert.ok(toolsCat);
         assert.ok(toolsCat.tokens > 0);
         assert.equal(result.toolDefinitions.length, 2);
-        // Sorted by tokens descending
         assert.ok(
             result.toolDefinitions[0].tokens >= result.toolDefinitions[1].tokens
         );
+    });
+
+    void it("separates context files from system prompt", () => {
+        const contextFiles = [
+            {
+                path: "/project/AGENTS.md",
+                content: "Some project instructions here".repeat(10),
+            },
+            {
+                path: "/home/user/.pi/agent/AGENTS.md",
+                content: "Global instructions".repeat(10),
+            },
+        ];
+        const result = analyseContext(
+            [],
+            "System prompt with lots of content including context files",
+            NO_TOOLS,
+            1000,
+            200_000,
+            "test",
+            contextFiles
+        );
+
+        const ctxCat = result.categories.find(
+            (c) => c.name === "Context files"
+        );
+        assert.ok(ctxCat);
+        assert.ok(ctxCat.tokens > 0);
+        assert.equal(result.contextFiles.length, 2);
+        // Sorted by tokens descending
+        assert.ok(
+            result.contextFiles[0].tokens >= result.contextFiles[1].tokens
+        );
+    });
+
+    void it("subtracts context file tokens from system prompt", () => {
+        const basePrompt = "Base system prompt. ".repeat(500); // ~6k tokens
+        const contextFiles = [
+            { path: "/project/AGENTS.md", content: "x".repeat(400) }, // ~100 tokens
+        ];
+        const ctxFileTokens = roughTokens("x".repeat(400));
+        const resultWith = analyseContext(
+            [],
+            basePrompt,
+            NO_TOOLS,
+            1000,
+            200_000,
+            "test",
+            contextFiles
+        );
+        const resultWithout = analyseContext(
+            [],
+            basePrompt,
+            NO_TOOLS,
+            1000,
+            200_000,
+            "test"
+        );
+        const sysWith = resultWith.categories.find(
+            (c) => c.name === "System prompt"
+        );
+        const sysWithout = resultWithout.categories.find(
+            (c) => c.name === "System prompt"
+        );
+        assert.ok(sysWith && sysWithout);
+        assert.equal(sysWith.tokens, sysWithout.tokens - ctxFileTokens);
+    });
+
+    void it("categorises skills", () => {
+        const skillCommands = [
+            {
+                name: "journal",
+                description: "Record temporal entries",
+                source: "skill" as const,
+                sourceInfo:
+                    {} as import("@earendil-works/pi-coding-agent").SourceInfo,
+            },
+            {
+                name: "memory",
+                description: "Extract reusable patterns",
+                source: "skill" as const,
+                sourceInfo:
+                    {} as import("@earendil-works/pi-coding-agent").SourceInfo,
+            },
+        ];
+        const result = analyseContext(
+            [],
+            "",
+            NO_TOOLS,
+            500,
+            200_000,
+            "test",
+            undefined,
+            skillCommands
+        );
+        const skillsCat = result.categories.find((c) => c.name === "Skills");
+        assert.ok(skillsCat);
+        assert.ok(skillsCat.tokens > 0);
+        assert.equal(result.skills.length, 2);
+    });
+
+    void it("subtracts skill tokens from system prompt", () => {
+        const basePrompt = "Base prompt. ".repeat(500); // ~6k tokens
+        const skillCommands = [
+            {
+                name: "journal",
+                description: "A long description " + "x".repeat(400),
+                source: "skill" as const,
+                sourceInfo:
+                    {} as import("@earendil-works/pi-coding-agent").SourceInfo,
+            },
+        ];
+        const resultWith = analyseContext(
+            [],
+            basePrompt,
+            NO_TOOLS,
+            1000,
+            200_000,
+            "test",
+            undefined,
+            skillCommands
+        );
+        const resultWithout = analyseContext(
+            [],
+            basePrompt,
+            NO_TOOLS,
+            1000,
+            200_000,
+            "test"
+        );
+        const sysWith = resultWith.categories.find(
+            (c) => c.name === "System prompt"
+        );
+        const sysWithout = resultWithout.categories.find(
+            (c) => c.name === "System prompt"
+        );
+        assert.ok(sysWith && sysWithout);
+        assert.ok(sysWith.tokens < sysWithout.tokens);
     });
 
     void it("breaks down assistant and user messages", () => {
@@ -307,7 +444,6 @@ void describe("buildGrid", () => {
             "test"
         );
         const { legend } = buildGrid(data, THEME);
-        // System prompt + Free space + Autocompact/Compact buffer = at least 3
         assert.ok(legend.length >= 3);
     });
 
@@ -335,7 +471,6 @@ void describe("generateSuggestions", () => {
     });
 
     void it("warns about large tool results", () => {
-        // Create entries with a large tool call (>15% of 200k context)
         const longText = "x".repeat(200_000);
         const entries: SessionEntry[] = [
             msgEntry("assistant", [
@@ -358,9 +493,28 @@ void describe("generateSuggestions", () => {
         assert.ok(suggestions.some((s) => s.title.includes("bash")));
     });
 
+    void it("warns about context file bloat", () => {
+        const contextFiles = [
+            {
+                path: "/project/AGENTS.md",
+                content: "x".repeat(100_000),
+            },
+        ];
+        const data = analyseContext(
+            [],
+            "",
+            NO_TOOLS,
+            150_000,
+            200_000,
+            "test",
+            contextFiles
+        );
+        const suggestions = generateSuggestions(data);
+        assert.ok(suggestions.some((s) => s.title.includes("Context files")));
+    });
+
     void it("warns when autocompact disabled and over 50%", () => {
         const data = analyseContext([], "", NO_TOOLS, 120_000, 200_000, "test");
-        // Force autoCompactEnabled to false
         data.autoCompactEnabled = false;
         data.percent = 60;
         const suggestions = generateSuggestions(data);
