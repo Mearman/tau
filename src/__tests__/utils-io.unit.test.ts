@@ -81,6 +81,7 @@ void describe("formatJobLine", () => {
             status: "running" as const,
             logPath: "/tmp/pi-bg-job-1.log",
             toolCallId: "tc-1",
+            isBackgrounded: true,
         };
         const line = formatJobLine(job);
         assert.ok(line.includes("job-1"));
@@ -97,6 +98,7 @@ void describe("formatJobLine", () => {
             status: "completed" as const,
             logPath: "/tmp/pi-bg-job-2.log",
             toolCallId: "tc-2",
+            isBackgrounded: true,
         };
         const line = formatJobLine(job);
         assert.ok(line.includes("completed"));
@@ -111,6 +113,7 @@ void describe("formatJobLine", () => {
             status: "running" as const,
             logPath: "/tmp/pi-bg-job-3.log",
             toolCallId: "tc-3",
+            isBackgrounded: true,
         };
         const line = formatJobLine(job);
         // The command portion should be at most 80 chars

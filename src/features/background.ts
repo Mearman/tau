@@ -6,12 +6,11 @@
  */
 
 import { spawn } from "node:child_process";
-import { closeSync, createWriteStream, openSync, statSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type {
-    ExtensionAPI,
-    ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
     createBashTool,
     type BashToolDetails,
@@ -27,8 +26,10 @@ import {
     STALL_TAIL_BYTES,
     STALL_THRESHOLD_MS,
     createJobDonePromise,
+    detectBlockedSleep,
     formatDuration,
     generateJobId,
+    isAutoBackgroundAllowed,
     killProcessGroup,
     logPathForJob,
     looksLikePrompt,
@@ -230,125 +231,88 @@ export function notifyCompletion(
     );
 }
 
-// ── Background a running foreground process ────────────────────────
+// ── Background a running foreground process (signal-based) ─────────
 
-export function backgroundProcess(
-    rp: RunningProcess,
+/**
+ * Register a foreground process as a background job, start stall watchdog,
+ * and set up completion handlers. Called when the background signal wins
+ * the Promise.race (timeout or Ctrl+B).
+ */
+function registerBackgroundJob(
+    proc: import("node:child_process").ChildProcess,
+    logPath: string,
+    command: string,
+    toolCallId: string,
     state: TauState,
     pi: ExtensionAPI,
     ctx: UiContext
-): void {
+): BackgroundJob {
     const jobId = generateJobId(++state.jobCounter);
-    const logPath = logPathForJob(jobId);
 
     const job: BackgroundJob = {
         id: jobId,
-        command: rp.command,
-        pid: rp.proc.pid!,
+        command,
+        pid: proc.pid!,
         startTime: Date.now(),
         status: "running",
         logPath,
-        proc: rp.proc,
-        toolCallId: rp.toolCallId,
+        proc,
+        toolCallId,
+        isBackgrounded: true,
     };
     createJobDonePromise(job);
 
-    rp.backgrounded = true;
-    state.backgroundJobs.set(jobId, job);
+    // Update existing job registration from foreground to background
+    const existingJob = state.backgroundJobs.get(jobId);
+    if (existingJob) {
+        existingJob.isBackgrounded = true;
+    } else {
+        state.backgroundJobs.set(jobId, job);
+    }
     state.currentlyRunningToolCallId = null;
 
-    if (rp.stdoutListener)
-        rp.proc.stdout?.removeListener("data", rp.stdoutListener);
-    if (rp.stderrListener)
-        rp.proc.stderr?.removeListener("data", rp.stderrListener);
-
-    rp.logStream = createWriteStream(logPath, { flags: "w" });
-    rp.logStream.write(rp.output);
-    rp.proc.stdout?.pipe(rp.logStream, { end: false });
-    rp.proc.stderr?.pipe(rp.logStream, { end: false });
-
-    const cancelStall = startStallWatchdog(
-        jobId,
-        rp.command,
-        logPath,
-        pi,
-        () => {
-            if (rp.proc.pid) killProcessGroup(rp.proc.pid, "SIGTERM");
-            silenceJobAfterKill(state.backgroundJobs.get(jobId)!);
-        }
-    );
-
-    rp.proc.on("close", () => {
-        cancelStall();
-        if (rp.logStream) {
-            rp.logStream.end();
-            rp.logStream = undefined;
-        }
+    const cancelStall = startStallWatchdog(jobId, command, logPath, pi, () => {
+        if (proc.pid) killProcessGroup(proc.pid, "SIGTERM");
+        silenceJobAfterKill(job);
     });
 
-    if (rp.resolve) {
-        rp.resolve({
-            content: [
-                {
-                    type: "text" as const,
-                    text: `Process backgrounded as ${jobId}\nCommand: ${rp.command}\nPID: ${job.pid}\nOutput: ${logPath}`,
-                },
-            ],
-            details: undefined,
-        });
-    }
+    proc.on("close", () => {
+        cancelStall();
+    });
 
     ctx.ui.notify(`Process backgrounded as ${jobId}`, "info");
     updateWidget(state, ctx);
+
+    return job;
 }
 
-// ── Default timeout timer ─────────────────────────────────────────
+// ── Default timeout timer (signal-based) ─────────────────────────────
 
+/**
+ * Start a timer that resolves the background signal after timeoutMs.
+ * If the command is not auto-backgroundable, kills the process instead.
+ * Returns the timer handle so it can be cleared on early completion.
+ */
 export function startTimeoutTimer(
-    rp: RunningProcess,
+    triggerBackground: () => void,
+    command: string,
     state: TauState,
-    pi: ExtensionAPI,
-    ctx: ExtensionContext,
+    toolCallId: string,
     explicitTimeoutMs?: number
 ): NodeJS.Timeout {
     const timeoutMs = explicitTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const timer = setTimeout(() => {
-        if (state.currentlyRunningToolCallId !== rp.toolCallId) return;
-        if (rp.backgrounded) return;
+        if (state.currentlyRunningToolCallId !== toolCallId) return;
 
-        backgroundProcess(rp, state, pi, ctx);
+        // If auto-backgrounding is disallowed for this command, kill it
+        if (!isAutoBackgroundAllowed(command)) {
+            const rp = state.runningProcesses.get(toolCallId);
+            if (rp?.proc.pid) killProcessGroup(rp.proc.pid, "SIGTERM");
+            return;
+        }
 
-        const job = Array.from(state.backgroundJobs.values()).find(
-            (j) => j.toolCallId === rp.toolCallId
-        );
-        if (!job) return;
-
-        state.pendingDecisionJobId = job.id;
-
-        const duration = formatDuration(timeoutMs);
-        pi.sendMessage(
-            {
-                customType: "bg-timeout",
-                content:
-                    `⏰ Command timed out after ${duration} and has been backgrounded as ${job.id}.\n` +
-                    `Command: ${rp.command}\n` +
-                    `PID: ${job.pid}\n` +
-                    `Output so far: ${job.logPath}\n\n` +
-                    `Use the job_decide tool with jobId "${job.id}" to decide:\n` +
-                    `- decision "check": inspect the output first\n` +
-                    `- decision "keep": let it continue running\n` +
-                    `- decision "kill": terminate it\n\n` +
-                    `Do NOT use jobs action "attach" on this job — it will block indefinitely.`,
-                display: true,
-                details: {
-                    jobId: job.id,
-                    logPath: job.logPath,
-                    command: rp.command,
-                },
-            },
-            { deliverAs: "followUp", triggerTurn: true }
-        );
+        triggerBackground();
     }, timeoutMs);
     timer.unref();
     return timer;
@@ -389,152 +353,268 @@ export function registerBackgroundJobs(
         ): Promise<AgentToolResult<BashToolDetails | undefined>> {
             const { command } = params;
 
-            return new Promise<AgentToolResult<BashToolDetails | undefined>>(
-                (resolve, reject) => {
-                    const proc = spawn("bash", ["-c", command], {
-                        stdio: ["pipe", "pipe", "pipe"],
-                        cwd: ctx.cwd,
-                        detached: true,
-                        env: { ...process.env },
+            // Validate: block sleep >= 2s
+            const sleepMatch = detectBlockedSleep(command);
+            if (sleepMatch) {
+                throw new Error(
+                    `Blocked: ${sleepMatch}. Use bash_bg for long waits. ` +
+                        "For pacing < 2s, sleep is fine."
+                );
+            }
+
+            // Prepare log file — output goes here from the start
+            const jobId = generateJobId(++state.jobCounter);
+            const logPath = logPathForJob(jobId);
+            mkdirSync(dirname(logPath), { recursive: true });
+
+            const logFd = openSync(logPath, "w");
+            const proc = spawn("bash", ["-c", command], {
+                stdio: ["pipe", logFd, logFd],
+                cwd: ctx.cwd,
+                detached: true,
+                env: { ...process.env },
+            });
+            closeSync(logFd);
+
+            if (!proc.pid) {
+                throw new Error("Failed to spawn process");
+            }
+
+            // Background signal — resolved by timeout timer or Ctrl+B
+            let backgroundResolve: (() => void) | null = null;
+            const backgroundSignal = new Promise<void>((resolve) => {
+                backgroundResolve = resolve;
+            });
+
+            function triggerBackground(): void {
+                backgroundResolve?.();
+            }
+
+            // Register as a foreground RunningProcess so Ctrl+B can find it
+            const rp: RunningProcess = {
+                toolCallId,
+                proc,
+                command,
+                logPath,
+                triggerBackground,
+            };
+            state.runningProcesses.set(toolCallId, rp);
+            state.currentlyRunningToolCallId = toolCallId;
+
+            // Register as foreground job in backgroundJobs
+            state.backgroundJobs.set(jobId, {
+                id: jobId,
+                command,
+                pid: proc.pid,
+                startTime: Date.now(),
+                status: "running",
+                logPath,
+                proc,
+                toolCallId,
+                isBackgrounded: false,
+            });
+
+            // Build process result promise
+            const procResult = new Promise<{
+                code: number | null;
+                interrupted: boolean;
+            }>((resolve) => {
+                proc.on("close", (code) => {
+                    resolve({
+                        code,
+                        interrupted: code === 137 || code === 143,
                     });
+                });
+                proc.on("error", () => {
+                    resolve({ code: 1, interrupted: false });
+                });
+            });
 
-                    if (!proc.pid) {
-                        reject(new Error("Failed to spawn process"));
-                        return;
-                    }
+            // Abort handler
+            if (signal) {
+                signal.addEventListener("abort", () => {
+                    killProcessGroup(proc.pid!, "SIGTERM");
+                });
+            }
 
-                    const rp: RunningProcess = {
-                        toolCallId,
-                        proc,
-                        command,
-                        backgrounded: false,
-                        output: "",
-                        resolve: resolve as (
-                            result: AgentToolResult<unknown>
-                        ) => void,
-                        reject,
-                    };
+            // Start timeout timer
+            const timer = startTimeoutTimer(
+                triggerBackground,
+                command,
+                state,
+                toolCallId,
+                typeof params.timeout === "number"
+                    ? params.timeout * 1_000
+                    : undefined
+            );
 
-                    state.runningProcesses.set(toolCallId, rp);
-                    state.currentlyRunningToolCallId = toolCallId;
+            // Background hint
+            const hintTimer = setTimeout(() => {
+                ctx.ui.notify("⏱ Ctrl+B to background", "info");
+            }, 2_000);
+            hintTimer.unref();
 
-                    function handleData(data: Buffer): void {
-                        const chunk = data.toString();
-                        rp.output += chunk;
-                        onUpdate?.({
-                            content: [
-                                { type: "text" as const, text: rp.output },
-                            ],
-                            details: undefined,
-                        });
-                    }
-
-                    const stdoutListener = (data: Buffer) => handleData(data);
-                    const stderrListener = (data: Buffer) => handleData(data);
-                    rp.stdoutListener = stdoutListener;
-                    rp.stderrListener = stderrListener;
-                    proc.stdout?.on("data", stdoutListener);
-                    proc.stderr?.on("data", stderrListener);
-
-                    proc.on("close", (code) => {
-                        state.runningProcesses.delete(toolCallId);
-                        if (state.currentlyRunningToolCallId === toolCallId) {
-                            state.currentlyRunningToolCallId = null;
-                        }
-                        if (rp.logStream) {
-                            rp.logStream.end();
-                            rp.logStream = undefined;
-                        }
-
-                        if (rp.backgrounded) {
-                            const job = Array.from(
-                                state.backgroundJobs.values()
-                            ).find((j) => j.toolCallId === toolCallId);
-                            if (job) {
-                                markJobTerminal(
-                                    job,
-                                    code === 0 || code === null
-                                        ? "completed"
-                                        : "failed",
-                                    code ?? 0
-                                );
-                                clearPendingDecision(state, job);
-                                notifyCompletion(job, state, pi, ctx);
-                                updateWidget(state, ctx);
-                            }
-                        } else {
-                            resolve({
+            // File-polling for foreground progress
+            const PROGRESS_POLL_MS = 1_000;
+            let pollTimer: NodeJS.Timeout | undefined;
+            const startPolling = (): void => {
+                pollTimer = setInterval(() => {
+                    try {
+                        const content = readOutputTailSync(logPath, 4_096);
+                        if (content && content !== "(no output yet)") {
+                            onUpdate?.({
                                 content: [
-                                    {
-                                        type: "text" as const,
-                                        text: rp.output || "(no output)",
-                                    },
+                                    { type: "text" as const, text: content },
                                 ],
                                 details: undefined,
                             });
                         }
-                    });
-
-                    proc.on("error", (err) => {
-                        state.runningProcesses.delete(toolCallId);
-                        if (state.currentlyRunningToolCallId === toolCallId) {
-                            state.currentlyRunningToolCallId = null;
-                        }
-                        if (rp.logStream) {
-                            rp.logStream.end();
-                            rp.logStream = undefined;
-                        }
-
-                        if (rp.backgrounded) {
-                            const job = Array.from(
-                                state.backgroundJobs.values()
-                            ).find((j) => j.toolCallId === toolCallId);
-                            if (job) {
-                                markJobTerminal(job, "failed");
-                                clearPendingDecision(state, job);
-                                notifyCompletion(job, state, pi, ctx);
-                                updateWidget(state, ctx);
-                            }
-                        } else {
-                            reject(err);
-                        }
-                    });
-
-                    if (signal) {
-                        signal.addEventListener("abort", () => {
-                            if (!rp.backgrounded) {
-                                killProcessGroup(proc.pid!, "SIGTERM");
-                                state.runningProcesses.delete(toolCallId);
-                                if (
-                                    state.currentlyRunningToolCallId ===
-                                    toolCallId
-                                ) {
-                                    state.currentlyRunningToolCallId = null;
-                                }
-                                reject(new Error("Command cancelled"));
-                            }
-                        });
+                    } catch {
+                        // File may not be readable yet
                     }
+                }, PROGRESS_POLL_MS);
+                pollTimer.unref();
+            };
 
-                    startTimeoutTimer(
-                        rp,
+            try {
+                // Wait for initial output or quick completion (2s threshold)
+                const initialResult = await Promise.race([
+                    procResult,
+                    new Promise<null>((resolve) => {
+                        const t = setTimeout(
+                            resolve,
+                            2_000
+                        ) as unknown as NodeJS.Timeout;
+                        t.unref();
+                    }),
+                ]);
+
+                // Command completed quickly — return result
+                if (initialResult !== null) {
+                    const output = await readFile(logPath, "utf-8").catch(
+                        () => ""
+                    );
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: output || "(no output)",
+                            },
+                        ],
+                        details: undefined,
+                    };
+                }
+
+                // Command still running — start polling for progress
+                startPolling();
+
+                // Race: completion vs background signal
+                const raceResult = await Promise.race([
+                    procResult.then((r) => ({
+                        type: "completed" as const,
+                        ...r,
+                    })),
+                    backgroundSignal.then(() => ({
+                        type: "backgrounded" as const,
+                    })),
+                ]);
+
+                if (raceResult.type === "backgrounded") {
+                    // Clean up foreground state
+                    clearInterval(pollTimer);
+                    clearTimeout(timer);
+                    clearTimeout(hintTimer);
+                    state.runningProcesses.delete(toolCallId);
+
+                    // Register as background job with completion handlers
+                    const job = registerBackgroundJob(
+                        proc,
+                        logPath,
+                        command,
+                        toolCallId,
                         state,
                         pi,
-                        ctx,
-                        typeof params.timeout === "number"
-                            ? params.timeout * 1_000
-                            : undefined
+                        ctx
                     );
 
-                    const hintTimer = setTimeout(() => {
-                        ctx.ui.notify("⏱ Ctrl+B to background", "info");
-                    }, 2_000);
-                    hintTimer.unref();
-                    rp.proc.on("close", () => {
-                        clearTimeout(hintTimer);
-                    });
+                    state.pendingDecisionJobId = job.id;
+
+                    const duration = formatDuration(
+                        typeof params.timeout === "number"
+                            ? params.timeout * 1_000
+                            : DEFAULT_TIMEOUT_MS
+                    );
+                    pi.sendMessage(
+                        {
+                            customType: "bg-timeout",
+                            content:
+                                `⏰ Command timed out after ${duration} and has been backgrounded as ${job.id}.\n` +
+                                `Command: ${command}\n` +
+                                `PID: ${job.pid}\n` +
+                                `Output so far: ${job.logPath}\n\n` +
+                                `Use the job_decide tool with jobId "${job.id}" to decide:\n` +
+                                `- decision "check": inspect the output first\n` +
+                                `- decision "keep": let it continue running\n` +
+                                `- decision "kill": terminate it\n\n` +
+                                `Do NOT use jobs action "attach" on this job — it will block indefinitely.`,
+                            display: true,
+                            details: {
+                                jobId: job.id,
+                                logPath: job.logPath,
+                                command,
+                            },
+                        },
+                        { deliverAs: "followUp", triggerTurn: true }
+                    );
+
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: `Process backgrounded as ${job.id}\nCommand: ${command}\nPID: ${job.pid}\nOutput: ${job.logPath}`,
+                            },
+                        ],
+                        details: undefined,
+                    };
                 }
-            );
+
+                // Command completed normally
+                clearInterval(pollTimer);
+                clearTimeout(timer);
+                clearTimeout(hintTimer);
+                state.runningProcesses.delete(toolCallId);
+                if (state.currentlyRunningToolCallId === toolCallId) {
+                    state.currentlyRunningToolCallId = null;
+                }
+                // Remove foreground job registration
+                state.backgroundJobs.delete(jobId);
+
+                const output = await readFile(logPath, "utf-8").catch(() => "");
+
+                if (
+                    raceResult.code !== 0 &&
+                    raceResult.code !== null &&
+                    !raceResult.interrupted
+                ) {
+                    throw new Error(
+                        output || `Command exited with code ${raceResult.code}`
+                    );
+                }
+
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: output || "(no output)",
+                        },
+                    ],
+                    details: undefined,
+                };
+            } finally {
+                clearInterval(pollTimer);
+                clearTimeout(timer);
+                clearTimeout(hintTimer);
+            }
         },
     });
 
@@ -596,6 +676,7 @@ export function registerBackgroundJobs(
                 logPath,
                 proc,
                 toolCallId,
+                isBackgrounded: true,
             };
             createJobDonePromise(job);
             state.backgroundJobs.set(jobId, job);

@@ -230,6 +230,35 @@ export function lastAssistantText(
     return undefined;
 }
 
+// ─── Command policies ────────────────────────────────────────────────
+
+/** Commands that should not be automatically backgrounded on timeout. */
+const DISALLOWED_AUTO_BACKGROUND_COMMANDS = ["sleep"];
+
+/** Check whether a command is allowed to be auto-backgrounded. */
+export function isAutoBackgroundAllowed(command: string): boolean {
+    const base = command.trim().split(/\s+/)[0] ?? "";
+    return !DISALLOWED_AUTO_BACKGROUND_COMMANDS.includes(base);
+}
+
+/**
+ * Detect standalone or leading `sleep N` patterns that should run in
+ * foreground or use bash_bg instead. Returns the matched command or null.
+ * Blocks sleep >= 2 seconds; allows sub-2s pacing.
+ */
+export function detectBlockedSleep(command: string): string | null {
+    const first =
+        command
+            .trim()
+            .split(/&&|;|\|/)[0]
+            ?.trim() ?? "";
+    const m = /^sleep\s+(\d+(?:\.\d+)?)\s*$/.exec(first);
+    if (!m) return null;
+    const secs = parseFloat(m[1]);
+    if (secs < 2) return null;
+    return first;
+}
+
 // ─── DnD check ──────────────────────────────────────────────────────
 
 /** Check macOS system Do Not Disturb / Focus mode using notifyutil. */

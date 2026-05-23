@@ -13,6 +13,7 @@ void describe("markJobTerminal", () => {
             status: "running",
             logPath: "/tmp/pi-bg-job-1.log",
             toolCallId: "tc-1",
+            isBackgrounded: true,
         };
         createJobDonePromise(job);
         markJobTerminal(job, "completed", 0);
@@ -30,6 +31,7 @@ void describe("markJobTerminal", () => {
             status: "running",
             logPath: "/tmp/pi-bg-job-2.log",
             toolCallId: "tc-2",
+            isBackgrounded: true,
         };
         createJobDonePromise(job);
         markJobTerminal(job, "failed", 1);
@@ -46,6 +48,7 @@ void describe("markJobTerminal", () => {
             status: "running",
             logPath: "/tmp/pi-bg-job-5.log",
             toolCallId: "tc-5",
+            isBackgrounded: true,
         };
         createJobDonePromise(job);
         markJobTerminal(job, "killed");
@@ -66,6 +69,7 @@ void describe("markJobTerminal", () => {
             status: "running",
             logPath: "/tmp/pi-bg-job-3.log",
             toolCallId: "tc-3",
+            isBackgrounded: true,
         };
         createJobDonePromise(job);
         const promise = job.donePromise;
@@ -86,6 +90,7 @@ void describe("createJobDonePromise", () => {
             status: "running",
             logPath: "/tmp/pi-bg-job-4.log",
             toolCallId: "tc-4",
+            isBackgrounded: true,
         };
         createJobDonePromise(job);
         assert.ok(job.donePromise instanceof Promise);

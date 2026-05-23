@@ -12,6 +12,22 @@ import type { BackgroundJob, RunningProcess } from "../types.ts";
 import { createJobDonePromise } from "../utils.ts";
 import { silenceJobAfterKill } from "../features/background.ts";
 
+/** Helper to create a BackgroundJob with all required fields. */
+function makeJob(
+    overrides: Partial<BackgroundJob> & { id: string }
+): BackgroundJob {
+    return {
+        command: "test",
+        pid: 1,
+        startTime: 0,
+        status: "completed",
+        logPath: "/tmp/test",
+        toolCallId: "tc-1",
+        isBackgrounded: false,
+        ...overrides,
+    };
+}
+
 /**
  * Capture the job_decide tool handler via DI.
  */
@@ -94,15 +110,10 @@ void describe("job_decide — pendingDecisionJobId cleanup", () => {
 
     void it("resolves job without job- prefix", async () => {
         const state = new TauState();
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-12345-1",
-            command: "echo hi",
-            pid: 12345,
-            startTime: 0,
             status: "running",
-            logPath: "/tmp/pi-bg-job-12345-1.log",
-            toolCallId: "tc-1",
-        };
+        });
         state.backgroundJobs.set("job-12345-1", job);
         state.pendingDecisionJobId = "job-12345-1";
 
@@ -140,16 +151,14 @@ void describe("job_decide — pendingDecisionJobId cleanup", () => {
 
     void it("sets outputConsumed when killing a running job", async () => {
         const state = new TauState();
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-99999-2",
             command: "sleep 999",
             pid: -999998,
-            startTime: 0,
             status: "running",
-            logPath: "/tmp/pi-bg-job-99999-2.log",
             toolCallId: "tc-jd-1",
             proc: { pid: -999998 } as never,
-        };
+        });
         state.backgroundJobs.set("job-99999-2", job);
         state.pendingDecisionJobId = "job-99999-2";
 
@@ -187,15 +196,7 @@ void describe("job_decide — pendingDecisionJobId cleanup", () => {
 void describe("lookupJob", () => {
     void it("finds job by exact id", () => {
         const state = new TauState();
-        const job: BackgroundJob = {
-            id: "job-12345-1",
-            command: "test",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/test",
-            toolCallId: "tc-1",
-        };
+        const job = makeJob({ id: "job-12345-1" });
         state.backgroundJobs.set("job-12345-1", job);
 
         assert.equal(lookupJob(state, "job-12345-1")?.id, "job-12345-1");
@@ -203,15 +204,7 @@ void describe("lookupJob", () => {
 
     void it("finds job without job- prefix", () => {
         const state = new TauState();
-        const job: BackgroundJob = {
-            id: "job-12345-1",
-            command: "test",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/test",
-            toolCallId: "tc-1",
-        };
+        const job = makeJob({ id: "job-12345-1" });
         state.backgroundJobs.set("job-12345-1", job);
 
         assert.equal(lookupJob(state, "12345-1")?.id, "job-12345-1");
@@ -224,24 +217,12 @@ void describe("lookupJob", () => {
 
     void it("prefers exact match over prefix match", () => {
         const state = new TauState();
-        const exact: BackgroundJob = {
-            id: "12345-1",
-            command: "exact",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/exact",
-            toolCallId: "tc-1",
-        };
-        const prefixed: BackgroundJob = {
+        const exact = makeJob({ id: "12345-1", command: "exact" });
+        const prefixed = makeJob({
             id: "job-12345-1",
             command: "prefixed",
             pid: 2,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/prefixed",
-            toolCallId: "tc-2",
-        };
+        });
         state.backgroundJobs.set("12345-1", exact);
         state.backgroundJobs.set("job-12345-1", prefixed);
 
@@ -255,15 +236,7 @@ void describe("clearPendingDecision", () => {
     void it("clears pendingDecisionJobId when it matches the job id", () => {
         const state = new TauState();
         state.pendingDecisionJobId = "job-1";
-        const job: BackgroundJob = {
-            id: "job-1",
-            command: "test",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/test",
-            toolCallId: "tc-1",
-        };
+        const job = makeJob({ id: "job-1" });
         clearPendingDecision(state, job);
         assert.equal(state.pendingDecisionJobId, undefined);
     });
@@ -271,30 +244,14 @@ void describe("clearPendingDecision", () => {
     void it("does not clear when job id does not match", () => {
         const state = new TauState();
         state.pendingDecisionJobId = "job-2";
-        const job: BackgroundJob = {
-            id: "job-1",
-            command: "test",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/test",
-            toolCallId: "tc-1",
-        };
+        const job = makeJob({ id: "job-1" });
         clearPendingDecision(state, job);
         assert.equal(state.pendingDecisionJobId, "job-2");
     });
 
     void it("is a no-op when pendingDecisionJobId is already undefined", () => {
         const state = new TauState();
-        const job: BackgroundJob = {
-            id: "job-1",
-            command: "test",
-            pid: 1,
-            startTime: 0,
-            status: "completed",
-            logPath: "/tmp/test",
-            toolCallId: "tc-1",
-        };
+        const job = makeJob({ id: "job-1" });
         clearPendingDecision(state, job);
         assert.equal(state.pendingDecisionJobId, undefined);
     });
@@ -305,16 +262,14 @@ void describe("clearPendingDecision", () => {
 void describe("jobs kill — outputConsumed", () => {
     void it("sets outputConsumed when killing a running job", async () => {
         const state = new TauState();
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-99999-1",
             command: "sleep 999",
             pid: -999999,
-            startTime: 0,
             status: "running",
-            logPath: "/tmp/pi-bg-job-99999-1.log",
             toolCallId: "tc-kill-1",
             proc: { pid: -999999 } as never,
-        };
+        });
         state.backgroundJobs.set("job-99999-1", job);
 
         const tool = captureJobsTool(state);
@@ -362,16 +317,15 @@ function captureCtrlXHandler(state: TauState) {
 void describe("Ctrl+X kill — outputConsumed", () => {
     void it("sets outputConsumed when killing the most recent running job", async () => {
         const state = new TauState();
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-99999-3",
             command: "sleep 999",
             pid: -999997,
             startTime: Date.now(),
             status: "running",
-            logPath: "/tmp/pi-bg-job-99999-3.log",
             toolCallId: "tc-ctrlx-1",
             proc: { pid: -999997 } as never,
-        };
+        });
         state.backgroundJobs.set("job-99999-3", job);
 
         const handler = captureCtrlXHandler(state);
@@ -425,16 +379,15 @@ function captureTasksInterface(state: TauState) {
 void describe("TUI kill — outputConsumed", () => {
     void it("sets outputConsumed when killing via the tasks interface", async () => {
         const state = new TauState();
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-99999-4",
             command: "sleep 999",
             pid: -999996,
             startTime: Date.now(),
             status: "running",
-            logPath: "/tmp/pi-bg-job-99999-4.log",
             toolCallId: "tc-tui-1",
             proc: { pid: -999996 } as never,
-        };
+        });
         state.backgroundJobs.set("job-99999-4", job);
 
         const handler = captureTasksInterface(state);
@@ -465,15 +418,13 @@ void describe("TUI kill — outputConsumed", () => {
 
 void describe("silenceJobAfterKill", () => {
     void it("sets outputConsumed so subsequent notifyCompletion is suppressed", () => {
-        const job: BackgroundJob = {
+        const job = makeJob({
             id: "job-99999-5",
             command: "sleep 999",
             pid: -999995,
-            startTime: 0,
             status: "running",
-            logPath: "/tmp/pi-bg-job-99999-5.log",
             toolCallId: "tc-silence-1",
-        };
+        });
         createJobDonePromise(job);
         silenceJobAfterKill(job);
         assert.equal(job.status, "killed");
@@ -481,139 +432,104 @@ void describe("silenceJobAfterKill", () => {
     });
 });
 
-// ─── startTimeoutTimer ───────────────────────────────────────────────────
+// ─── startTimeoutTimer (signal-based) ────────────────────────────────
 
 void describe("startTimeoutTimer", () => {
-    void it("uses explicit timeout when provided instead of DEFAULT_TIMEOUT_MS", async () => {
+    void it("calls triggerBackground after explicit timeout", async () => {
         const state = new TauState();
-        let sentMessageType: string | undefined;
-
-        const mockPi = {
-            sendMessage: (msg: { customType: string }) => {
-                sentMessageType = msg.customType;
-            },
-        } as never;
-        const mockCtx = {
-            ui: {
-                notify: () => {},
-                setWidget: () => {},
-                setStatus: () => {},
-                theme: { fg: () => "" },
-            },
-        } as never;
-
-        const proc = {
-            pid: -77777,
-            on: () => {},
-            stdout: { removeListener: () => {}, pipe: () => {} },
-            stderr: { removeListener: () => {}, pipe: () => {} },
-        } as never;
-        const rp: RunningProcess = {
-            toolCallId: "tc-timeout-1",
-            proc,
-            command: "sleep 60 && gh run view",
-            backgrounded: false,
-            output: "",
-        };
-        state.runningProcesses.set("tc-timeout-1", rp);
         state.currentlyRunningToolCallId = "tc-timeout-1";
+        let triggered = false;
 
-        // Use a short explicit timeout of 50ms so the test runs fast
-        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx, 50);
+        const timer = startTimeoutTimer(
+            () => {
+                triggered = true;
+            },
+            "npm test",
+            state,
+            "tc-timeout-1",
+            50
+        );
 
-        // Wait long enough for the timer to fire
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Process SHOULD have been backgrounded after the explicit timeout
         assert.equal(
-            rp.backgrounded,
+            triggered,
             true,
-            "Should be backgrounded after explicit timeout fires"
+            "triggerBackground should have been called"
         );
-        assert.equal(
-            sentMessageType,
-            "bg-timeout",
-            "Should have sent bg-timeout message"
-        );
-
         clearTimeout(timer);
     });
 
     void it("does NOT fire before the explicit timeout elapses", async () => {
         const state = new TauState();
-        let sentMessageType: string | undefined;
-
-        const mockPi = {
-            sendMessage: (msg: { customType: string }) => {
-                sentMessageType = msg.customType;
-            },
-        } as never;
-        const mockCtx = {
-            ui: {
-                notify: () => {},
-                setWidget: () => {},
-                theme: { fg: () => "" },
-            },
-        } as never;
-
-        const rp: RunningProcess = {
-            toolCallId: "tc-timeout-3",
-            proc: { pid: -77779 } as never,
-            command: "sleep 60 && gh run view",
-            backgrounded: false,
-            output: "",
-        };
-        state.runningProcesses.set("tc-timeout-3", rp);
         state.currentlyRunningToolCallId = "tc-timeout-3";
+        let triggered = false;
 
-        // Use an explicit timeout of 500ms
-        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx, 500);
+        const timer = startTimeoutTimer(
+            () => {
+                triggered = true;
+            },
+            "npm test",
+            state,
+            "tc-timeout-3",
+            500
+        );
 
-        // Wait 100ms — less than the explicit timeout
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Process should NOT have been backgrounded yet
         assert.equal(
-            rp.backgrounded,
+            triggered,
             false,
-            "Should NOT be backgrounded before explicit timeout fires"
+            "triggerBackground should NOT have been called yet"
         );
-        assert.equal(
-            sentMessageType,
-            undefined,
-            "Should not have sent bg-timeout message yet"
-        );
-
         clearTimeout(timer);
     });
 
     void it("uses DEFAULT_TIMEOUT_MS when no explicit timeout provided", () => {
         const state = new TauState();
-
-        const mockPi = {
-            sendMessage: () => {},
-        } as never;
-        const mockCtx = {
-            ui: {
-                notify: () => {},
-                setWidget: () => {},
-                theme: { fg: () => "" },
-            },
-        } as never;
-
-        const rp: RunningProcess = {
-            toolCallId: "tc-timeout-2",
-            proc: { pid: -77778 } as never,
-            command: "echo slow",
-            backgrounded: false,
-            output: "",
-        };
-        state.runningProcesses.set("tc-timeout-2", rp);
         state.currentlyRunningToolCallId = "tc-timeout-2";
 
-        // Without an explicit timeout, the timer uses DEFAULT_TIMEOUT_MS (15s)
-        const timer = startTimeoutTimer(rp, state, mockPi, mockCtx);
+        const timer = startTimeoutTimer(
+            () => {},
+            "echo slow",
+            state,
+            "tc-timeout-2"
+        );
         assert.ok(timer, "Timer created with default timeout");
+        clearTimeout(timer);
+    });
+
+    void it("does NOT trigger for disallowed commands (sleep)", async () => {
+        const state = new TauState();
+        state.currentlyRunningToolCallId = "tc-timeout-sleep";
+        let triggered = false;
+
+        // Register a mock running process so the kill path can find it
+        const mockProc = { pid: -88888 } as never;
+        const rp: RunningProcess = {
+            toolCallId: "tc-timeout-sleep",
+            proc: mockProc,
+            command: "sleep 60",
+            logPath: "/tmp/test-sleep.log",
+            triggerBackground: () => {
+                triggered = true;
+            },
+        };
+        state.runningProcesses.set("tc-timeout-sleep", rp);
+
+        const timer = startTimeoutTimer(
+            () => {
+                triggered = true;
+            },
+            "sleep 60",
+            state,
+            "tc-timeout-sleep",
+            50
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        assert.equal(triggered, false, "sleep should not be auto-backgrounded");
         clearTimeout(timer);
     });
 });

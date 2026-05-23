@@ -23,20 +23,18 @@ export interface BackgroundJob {
     resolveDone?: () => void;
     /** True once the agent has consumed output via attach — suppresses completion notification. */
     outputConsumed?: boolean;
+    /** True if running in background; false if foreground (not yet backgrounded). */
+    isBackgrounded: boolean;
 }
 
 export interface RunningProcess {
     toolCallId: string;
     proc: ChildProcess;
     command: string;
-    backgrounded: boolean;
-    /** Accumulated foreground output (before backgrounding). */
-    output: string;
-    /** Listener references so they can be removed on background. */
-    stdoutListener?: (data: Buffer) => void;
-    stderrListener?: (data: Buffer) => void;
-    /** Log file stream, created when the process is backgrounded. */
-    logStream?: ReturnType<typeof import("node:fs").createWriteStream>;
+    logPath: string;
+    /** Resolves when the process should be backgrounded. Set by timeout or Ctrl+B. */
+    triggerBackground: () => void;
+    /** Resolves the execute() promise with the given result. */
     resolve?: (result: AgentToolResult<unknown>) => void;
     reject?: (error: Error) => void;
 }

@@ -8,11 +8,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { BackgroundJob, UiContext } from "../types.ts";
-import {
-    backgroundProcess,
-    updateWidget,
-    silenceJobAfterKill,
-} from "./background.ts";
+import { updateWidget, silenceJobAfterKill } from "./background.ts";
 import {
     MAX_OUTPUT_PREVIEW_CHARS,
     createJobDonePromise,
@@ -21,7 +17,7 @@ import {
     readOutputTail,
 } from "../utils.ts";
 
-// ── Background shortcut handler (Ctrl+B) ────────────────────────────
+// ── Background shortcut handler (Ctrl+B) — signal-based ────────────
 
 export async function handleBackgroundShortcut(
     state: TauState,
@@ -45,12 +41,11 @@ export async function handleBackgroundShortcut(
         return;
     }
 
-    let didBackgroundBash = false;
+    // Trigger background via the signal on the RunningProcess
     if (state.currentlyRunningToolCallId) {
         const rp = state.runningProcesses.get(state.currentlyRunningToolCallId);
-        if (rp && !rp.backgrounded) {
-            backgroundProcess(rp, state, pi, ctx);
-            didBackgroundBash = true;
+        if (rp) {
+            rp.triggerBackground();
         }
     }
 
@@ -61,11 +56,7 @@ export async function handleBackgroundShortcut(
     );
     updateWidget(state, ctx);
 
-    if (didBackgroundBash) {
-        ctx.ui.notify("⏸ Backgrounded bash + agent. Ctrl+B to resume.", "info");
-    } else {
-        ctx.ui.notify("⏸ Backgrounded. Ctrl+B to resume.", "info");
-    }
+    ctx.ui.notify("⏸ Backgrounded. Ctrl+B to resume.", "info");
 }
 
 // ── Interactive task detail ──────────────────────────────────────────
