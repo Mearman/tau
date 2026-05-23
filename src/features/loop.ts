@@ -23,7 +23,11 @@
  *   /loop stop 1 — stop loop #N
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionCommandContext,
+    SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 
 // --- Constants ---
 
@@ -268,6 +272,164 @@ const DEFAULT_DONE_PATTERNS = [
     /\b(?:fully (?:implemented|complete))\b/i,
 ];
 
+// --- Context-based inference ---
+
+/** Patterns that suggest a monitoring/watching task and a good interval. */
+const INTERVAL_HINTS: Array<{
+    pattern: RegExp;
+    ms: number;
+    human: string;
+    label: string;
+}> = [
+    {
+        pattern: /\b(?:watch|monitor|tail|follow)\b/i,
+        ms: 5_000,
+        human: "5s",
+        label: "watch/monitor",
+    },
+    {
+        pattern:
+            /\b(?:wait(?:ing)?\s+for|poll(?:ing)?|check(?:ing)?\s+(?:every|in))\b/i,
+        ms: 10_000,
+        human: "10s",
+        label: "polling",
+    },
+    {
+        pattern: /\b(?:deploy|build|compile|ci\b|pipeline)\b/i,
+        ms: 60_000,
+        human: "1m",
+        label: "deploy/build",
+    },
+    {
+        pattern: /\b(?:test|spec|e2e|integration)\b/i,
+        ms: 30_000,
+        human: "30s",
+        label: "test runner",
+    },
+    {
+        pattern: /\b(?:status|health|heartbeat|check)\b/i,
+        ms: 60_000,
+        human: "1m",
+        label: "status check",
+    },
+];
+
+/** Default interval when no hint matches. */
+const DEFAULT_INTERVAL = { ms: 300_000, human: "5m", label: "default" };
+
+/**
+ * Extract text from a message content field.
+ * Handles string content and array-of-blocks content.
+ */
+function extractTextFromMessage(message: ContentMessage): string {
+    const content = message.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        return content
+            .filter(
+                (b: unknown): b is { type: string; text: string } =>
+                    typeof b === "object" &&
+                    b !== null &&
+                    "type" in b &&
+                    (b as { type: string }).type === "text" &&
+                    "text" in b
+            )
+            .map((b) => b.text)
+            .join(" ");
+    }
+    return "";
+}
+
+interface ContentMessage {
+    role: string;
+    content: unknown;
+}
+
+/** Check if a session entry is a message with a content field. */
+function isMessageEntry(
+    entry: SessionEntry
+): entry is SessionEntry & { message: ContentMessage } {
+    if (entry.type !== "message" || !("message" in entry)) return false;
+    const msg = (entry as { message?: unknown }).message;
+    if (typeof msg !== "object" || msg === null) return false;
+    return "content" in msg;
+}
+
+/**
+ * Infer the loop interval from conversation context.
+ *
+ * Scans the last few messages for keywords that suggest a polling frequency.
+ * Returns the first matching hint, or the default (5m).
+ */
+function inferInterval(entries: SessionEntry[]): {
+    ms: number;
+    human: string;
+    label: string;
+} {
+    // Look at the last 6 messages for interval hints
+    const recent = entries.filter(isMessageEntry).slice(-6);
+    const text = recent.map((e) => extractTextFromMessage(e.message)).join(" ");
+
+    for (const hint of INTERVAL_HINTS) {
+        if (hint.pattern.test(text)) return hint;
+    }
+    return DEFAULT_INTERVAL;
+}
+
+/**
+ * Infer the loop prompt from conversation context.
+ *
+ * Strategy:
+ * 1. If the last user message contains a task-like instruction, use that.
+ * 2. Otherwise, if the last assistant message describes ongoing work, derive a prompt.
+ * 3. Fall back to "Continue working".
+ */
+function inferPrompt(entries: SessionEntry[]): string {
+    const messageEntries = entries.filter(isMessageEntry);
+
+    // Walk backwards for the last user message
+    for (let i = messageEntries.length - 1; i >= 0; i--) {
+        const entry = messageEntries[i];
+        if (entry.message.role === "user") {
+            const text = extractTextFromMessage(entry.message).trim();
+            // Skip tick messages and empty messages
+            if (text && !text.startsWith("<" + TICK_TAG + ">")) {
+                return truncatePrompt(text);
+            }
+        }
+    }
+
+    // Walk backwards for the last assistant message
+    for (let i = messageEntries.length - 1; i >= 0; i--) {
+        const entry = messageEntries[i];
+        if (entry.message.role === "assistant") {
+            const text = extractTextFromMessage(entry.message).trim();
+            if (text) {
+                return truncatePrompt(text);
+            }
+        }
+    }
+
+    return "Continue working";
+}
+
+/** Truncate a prompt to a reasonable length for loop repetition. */
+function truncatePrompt(text: string): string {
+    const MAX_PROMPT_LENGTH = 200;
+    if (text.length <= MAX_PROMPT_LENGTH) return text;
+    // Try to cut at the last sentence boundary before the limit
+    const truncated = text.slice(0, MAX_PROMPT_LENGTH);
+    const lastSentence = Math.max(
+        truncated.lastIndexOf("."),
+        truncated.lastIndexOf("!"),
+        truncated.lastIndexOf("?")
+    );
+    if (lastSentence > MAX_PROMPT_LENGTH * 0.5) {
+        return truncated.slice(0, lastSentence + 1).trim();
+    }
+    return truncated.trim() + "…";
+}
+
 // --- Feature registration ---
 
 export function registerLoop(pi: ExtensionAPI): void {
@@ -487,7 +649,7 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
     pi.registerCommand("loop", {
         description:
             'Loop a prompt: count (5), duration (5m), cron (*/5 * * * *), or infinite (no prefix). Flags: --completion-promise[="text"]',
-        handler: async (args, ctx) => {
+        handler: async (args, ctx: ExtensionCommandContext) => {
             const trimmed = args.trim().toLowerCase();
 
             if (trimmed === "list") {
@@ -524,7 +686,108 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
                 return;
             }
 
-            const parsed = parseLoopArgs(args.trim());
+            let parsed = parseLoopArgs(args.trim());
+
+            // --- Context inference for missing prompt and/or interval ---
+            const needsPrompt = !parsed.prompt.trim();
+            const needsInterval = parsed.mode.kind === "infinite" && !trimmed;
+            const needsBoth = needsPrompt && needsInterval;
+
+            if (needsPrompt || needsInterval) {
+                const entries = ctx.sessionManager.getEntries();
+                const inferredInterval = inferInterval(entries);
+                const inferredPrompt = inferPrompt(entries);
+
+                if (needsBoth) {
+                    // Neither prompt nor mode provided — infer both
+                    const options = [
+                        `${inferredInterval.human} — "${inferredPrompt}" (${inferredInterval.label})`,
+                        `5m — "${inferredPrompt}" (default)`,
+                        "proactive (infinite, tick on agent_end)",
+                    ];
+                    const choice = await ctx.ui.select(
+                        "No prompt or interval given. Infer from context?",
+                        options
+                    );
+                    if (choice === undefined) return;
+
+                    if (choice === options[0]) {
+                        parsed = {
+                            mode: {
+                                kind: "interval",
+                                ms: inferredInterval.ms,
+                                human: inferredInterval.human,
+                            },
+                            prompt: inferredPrompt,
+                            completionPromise: parsed.completionPromise,
+                        };
+                    } else if (choice === options[1]) {
+                        parsed = {
+                            mode: {
+                                kind: "interval",
+                                ms: 300_000,
+                                human: "5m",
+                            },
+                            prompt: inferredPrompt,
+                            completionPromise: parsed.completionPromise,
+                        };
+                    } else {
+                        parsed = {
+                            mode: { kind: "infinite" },
+                            prompt: inferredPrompt,
+                            completionPromise: parsed.completionPromise,
+                        };
+                    }
+                } else if (needsInterval) {
+                    // Prompt given but no interval (e.g. "/loop check the build")
+                    const options = [
+                        `${inferredInterval.human} (${inferredInterval.label})`,
+                        "5m (default)",
+                        "proactive (infinite, tick on agent_end)",
+                    ];
+                    const choice = await ctx.ui.select(
+                        `No interval given for "${parsed.prompt}". How often?`,
+                        options
+                    );
+                    if (choice === undefined) return;
+
+                    if (choice === options[0]) {
+                        parsed = {
+                            ...parsed,
+                            mode: {
+                                kind: "interval",
+                                ms: inferredInterval.ms,
+                                human: inferredInterval.human,
+                            },
+                        };
+                    } else if (choice === options[1]) {
+                        parsed = {
+                            ...parsed,
+                            mode: {
+                                kind: "interval",
+                                ms: 300_000,
+                                human: "5m",
+                            },
+                        };
+                    }
+                    // else: keep infinite (proactive)
+                } else {
+                    // Interval given but no prompt (e.g. "/loop 5m")
+                    const choice = await ctx.ui.select(
+                        `No prompt given. Use inferred prompt?`,
+                        [
+                            `Yes: "${inferredPrompt}"`,
+                            "No: use empty prompt (timestamp only)",
+                        ]
+                    );
+                    if (choice === undefined) return;
+
+                    if (choice?.startsWith("Yes")) {
+                        parsed = { ...parsed, prompt: inferredPrompt };
+                    }
+                }
+            }
+
             const entry = startLoop(parsed);
 
             ctx.ui.notify(
