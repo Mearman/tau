@@ -113,7 +113,9 @@ export function formatJobLine(job: BackgroundJob): string {
     const duration = formatDuration(Date.now() - job.startTime);
     const status =
         job.status === "running"
-            ? `⏳ running (${duration})`
+            ? job.isBackgrounded
+                ? `◐ running (${duration})`
+                : `▶ running (${duration})`
             : job.status === "completed"
               ? "✅ completed"
               : job.status === "failed"

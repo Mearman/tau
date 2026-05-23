@@ -130,6 +130,13 @@ function startStallWatchdog(
     };
 }
 
+/** Check if there are any foreground tasks that can be backgrounded. */
+export function hasForegroundTasks(state: TauState): boolean {
+    return Array.from(state.backgroundJobs.values()).some(
+        (job) => job.status === "running" && !job.isBackgrounded && job.proc
+    );
+}
+
 // ─── Widget / status bar ────────────────────────────────────────────
 
 export function updateWidget(state: TauState, ctx: UiContext): void {
@@ -148,7 +155,10 @@ export function updateWidget(state: TauState, ctx: UiContext): void {
     }
     for (const job of runningJobs) {
         const duration = formatDuration(Date.now() - job.startTime);
-        pills.push(`◐ ${job.id}: ${job.command.slice(0, 25)} (${duration})`);
+        const icon = job.isBackgrounded ? "◐" : "▶";
+        pills.push(
+            `${icon} ${job.id}: ${job.command.slice(0, 25)} (${duration})`
+        );
     }
     ctx.ui.setWidget("background-jobs", pills);
 
