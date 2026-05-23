@@ -77,16 +77,20 @@ export function registerReloadTool(pi: ExtensionAPI, state: TauState): void {
             }
 
             // Defer the reload until the agent is truly idle.
-            // ctx.reload() shows a warning but resolves (doesn't reject) when
-            // the agent is busy, so polling doesn't work. Instead, schedule
-            // the reload with a generous delay that covers tool execution,
-            // agent response streaming, and TUI rendering.
+            // ctx.reload() shows a warning but resolves when the agent is
+            // busy. We must wait for ctx.isIdle() before calling reload.
             const doReload = state.commandContextReload;
-            setTimeout(() => {
-                doReload().catch(() => {
-                    /* reload may reject if session is shutting down */
-                });
-            }, 3000);
+            const pollIdleAndReload = async () => {
+                // Wait up to 30s for the agent to go idle
+                for (let i = 0; i < 150; i++) {
+                    await new Promise((r) => setTimeout(r, 200));
+                    if (_ctx.isIdle()) {
+                        await doReload();
+                        return;
+                    }
+                }
+            };
+            pollIdleAndReload();
 
             return {
                 content: [
