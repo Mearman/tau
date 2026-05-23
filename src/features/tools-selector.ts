@@ -4,6 +4,7 @@
 
 import type {
     ExtensionAPI,
+    ExtensionCommandContext,
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
@@ -13,6 +14,7 @@ import {
     SettingsList,
 } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
+import { captureReload } from "./reload.ts";
 
 // ─── State persistence ──────────────────────────────────────────────
 
@@ -56,7 +58,8 @@ export function restoreToolsFromBranch(
 export function registerToolsSelector(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("tools", {
         description: "Enable/disable tools",
-        handler: async (_args, ctx) => {
+        handler: async (_args, ctx: ExtensionCommandContext) => {
+            captureReload(state, ctx);
             state.allTools = pi.getAllTools();
 
             await ctx.ui.custom((_tui, theme, _kb, done) => {

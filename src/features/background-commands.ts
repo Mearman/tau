@@ -5,10 +5,14 @@
  * and the interactive tasks interface.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { BackgroundJob, UiContext } from "../types.ts";
 import { updateWidget, silenceJobAfterKill } from "./background.ts";
+import { captureReload } from "./reload.ts";
 import {
     MAX_OUTPUT_PREVIEW_CHARS,
     createJobDonePromise,
@@ -254,7 +258,8 @@ export function registerBackgroundCommands(
 
     pi.registerCommand("bg", {
         description: "Background bash/agent, or resume backgrounded agent",
-        handler: async (_args, ctx) => {
+        handler: async (_args, ctx: ExtensionCommandContext) => {
+            captureReload(state, ctx);
             await handleBackgroundShortcut(state, pi, ctx);
         },
     });
@@ -262,7 +267,8 @@ export function registerBackgroundCommands(
     pi.registerCommand("fg", {
         description:
             "Attach to a background job (/fg [job-id] [--snapshot]); defaults to most recent running job",
-        handler: async (args, ctx) => {
+        handler: async (args, ctx: ExtensionCommandContext) => {
+            captureReload(state, ctx);
             const parts = args.trim().split(/\s+/).filter(Boolean);
             const snapshot =
                 parts.includes("--snapshot") || parts.includes("-s");
@@ -329,7 +335,8 @@ export function registerBackgroundCommands(
 
     pi.registerCommand("jobs", {
         description: "Show and manage background tasks",
-        handler: async (_args, ctx) => {
+        handler: async (_args, ctx: ExtensionCommandContext) => {
+            captureReload(state, ctx);
             await showTasksInterface(state, pi, ctx);
         },
     });

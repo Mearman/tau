@@ -9,6 +9,7 @@
 import type {
     AgentToolResult,
     ExtensionAPI,
+    ExtensionCommandContext,
     ExtensionContext,
     ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -16,6 +17,7 @@ import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
 import type { Task, TaskDetails, TaskLink, TaskStatus } from "../types.ts";
+import { captureReload } from "./reload.ts";
 
 // ─── State reconstruction ───────────────────────────────────────────
 
@@ -583,7 +585,8 @@ export function registerTask(pi: ExtensionAPI, state: TauState): void {
 
     pi.registerCommand("tasks", {
         description: "Show all tasks on the current branch",
-        handler: async (_args, ctx) => {
+        handler: async (_args, ctx: ExtensionCommandContext) => {
+            captureReload(state, ctx);
             if (!ctx.hasUI) {
                 ctx.ui.notify("/tasks requires interactive mode", "error");
                 return;

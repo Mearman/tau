@@ -30,6 +30,15 @@ export class TauState {
     /** Model context window in tokens. Used by agent_bg to choose fork vs summary. */
     contextWindowTokens?: number;
 
+    // ── Reload bridge ──────────────────────────────────────────────────
+
+    /**
+     * Captured reload function from ExtensionCommandContext.
+     * Tools only receive ExtensionContext (no reload), so we capture it
+     * from the first command handler invocation and store it here.
+     */
+    commandContextReload?: () => Promise<void>;
+
     // ── Plan mode ────────────────────────────────────────────────────
 
     planModeEnabled = false;
