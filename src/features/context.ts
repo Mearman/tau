@@ -212,7 +212,7 @@ export function analyseContext(
         categories.push({
             name: "System prompt",
             tokens: systemTokens,
-            colour: "dim",
+            colour: "muted",
         });
     }
 
@@ -248,7 +248,7 @@ export function analyseContext(
         categories.push({
             name: "Tools",
             tokens: toolDefTotal,
-            colour: "dim",
+            colour: "toolTitle",
         });
     }
 
@@ -367,14 +367,14 @@ export function analyseContext(
         categories.push({
             name: "Autocompact buffer",
             tokens: bufferTokens,
-            colour: "dim",
+            colour: "borderMuted",
         });
     } else {
         // Manual compact buffer (mirrors CC MANUAL_COMPACT_BUFFER_TOKENS = 3000)
         categories.push({
             name: "Compact buffer",
             tokens: 3000,
-            colour: "dim",
+            colour: "borderMuted",
         });
     }
 
@@ -514,37 +514,39 @@ function getToolSpecificAdvice(toolName: string): string {
     }
 }
 
-// ─── Grid rendering (mirrors CC ContextVisualization) ────────────────
+// ─── Grid rendering ─────────────────────────────────────────────────
+//
+// Double-width cells (██) so the grid appears square.
+// Half-block technique (▀/▄) packs 2 logical rows per terminal line,
+// doubling vertical resolution.
+// The theme only exposes ThemeBg for specific UI slots, so we use
+// theme.getFgAnsi() and convert 38→48 to set arbitrary background colours.
 
 const FILLED = "\u2588"; // █
-const LOWER_SEVEN = "\u2589"; // ▉
-const LOWER_THREE = "\u258B"; // ▋
-const LOWER_ONE = "\u258D"; // ▍
-const EMPTY = "\u2591"; // ░
+const DARK_SHADE = "\u2593"; // ▓
+const UPPER = "\u2580"; // ▀ upper half block
+const LOWER = "\u2584"; // ▄ lower half block
 
-// Adaptive grid: 10×10 for 200k, 20×10 for 1M+
-function gridDimensions(contextWindow: number): {
-    cols: number;
-    rows: number;
-} {
-    if (contextWindow >= 1_000_000) return { cols: 20, rows: 10 };
-    return { cols: 10, rows: 10 };
+// Convert a theme FG ANSI sequence to a BG sequence.
+// e.g. \x1b[38;5;75m → \x1b[48;5;75m
+function fgToBg(ansiFg: string): string {
+    // eslint-disable-next-line no-control-regex
+    return ansiFg.replace(/\x1b\[38;/g, "\x1b[48;");
 }
 
-interface GridSquare {
-    colour: string;
-    symbol: string;
-    categoryName: string;
+interface Pixel {
+    colour: string; // theme colour key; "" = free space
 }
 
-export function buildGrid(
+export function buildPixels(
     data: ContextData,
-    theme: { fg(colour: string, text: string): string }
-): { grid: GridSquare[][]; legend: string[] } {
-    const { cols, rows } = gridDimensions(data.contextWindow);
-    const totalSquares = cols * rows;
+    cols: number,
+    rows: number
+): Pixel[] {
+    const total = cols * rows;
+    const pixels: Pixel[] = [];
 
-    const nonFreeNonReserved = data.categories.filter(
+    const contentCats = data.categories.filter(
         (c) =>
             c.name !== "Free space" &&
             c.name !== "Autocompact buffer" &&
@@ -552,156 +554,213 @@ export function buildGrid(
             !c.isDeferred
     );
 
-    const reservedCategory = data.categories.find(
+    const reservedCat = data.categories.find(
         (c) => c.name === "Autocompact buffer" || c.name === "Compact buffer"
     );
 
-    const squares: GridSquare[] = [];
     let used = 0;
 
-    for (const cat of nonFreeNonReserved) {
+    // Content categories in order
+    for (const cat of contentCats) {
         const fraction = cat.tokens / data.contextWindow;
         const count = Math.max(
             1,
-            Math.min(Math.round(fraction * totalSquares), totalSquares - used)
+            Math.min(Math.round(fraction * total), total - used)
         );
-
         for (let i = 0; i < count; i++) {
-            const isLast = i === count - 1;
-            const exact = fraction * totalSquares;
-            const remainder = exact - Math.floor(exact);
-
-            let symbol = FILLED;
-            if (isLast && count > 1) {
-                if (remainder < 0.3) symbol = LOWER_ONE;
-                else if (remainder < 0.5) symbol = LOWER_THREE;
-                else if (remainder < 0.7) symbol = LOWER_SEVEN;
-            }
-
-            squares.push({
-                colour: cat.colour,
-                symbol,
-                categoryName: cat.name,
-            });
+            pixels.push({ colour: cat.colour });
         }
         used += count;
     }
 
-    // Leave room for reserved at the end
-    const reservedCount = reservedCategory
+    // Reserve space for the buffer
+    const reservedCount = reservedCat
         ? Math.max(
               1,
-              Math.round(
-                  (reservedCategory.tokens / data.contextWindow) * totalSquares
-              )
+              Math.round((reservedCat.tokens / data.contextWindow) * total)
           )
         : 0;
-    const freeTarget = totalSquares - reservedCount;
 
-    while (squares.length < freeTarget) {
-        squares.push({
-            colour: "dim",
-            symbol: EMPTY,
-            categoryName: "Free space",
-        });
+    // Free space fills between content and reserved
+    const freeCount = Math.max(0, total - used - reservedCount);
+    for (let i = 0; i < freeCount; i++) {
+        pixels.push({ colour: "" });
     }
 
-    if (reservedCategory) {
-        const reservedFraction = reservedCategory.tokens / data.contextWindow;
-        const rCount = Math.max(
-            1,
-            Math.min(
-                Math.round(reservedFraction * totalSquares),
-                totalSquares - squares.length
-            )
-        );
+    // Reserved at the end
+    if (reservedCat) {
+        const rCount = Math.min(reservedCount, total - pixels.length);
         for (let i = 0; i < rCount; i++) {
-            squares.push({
-                colour: "dim",
-                symbol: "\u2593", // ▓
-                categoryName: reservedCategory.name,
-            });
+            pixels.push({ colour: reservedCat.colour });
         }
     }
 
-    // Pad if rounding left gaps
-    while (squares.length < totalSquares) {
-        squares.push({
-            colour: "dim",
-            symbol: EMPTY,
-            categoryName: "Free space",
-        });
+    // Pad / trim
+    while (pixels.length < total) pixels.push({ colour: "" });
+    pixels.length = total;
+
+    return pixels;
+}
+
+// Render the pixel grid using half-blocks for double vertical resolution
+// and double-width cells for square aspect ratio.
+export function renderGridLines(
+    data: ContextData,
+    theme: {
+        fg(colour: string, text: string): string;
+        getFgAnsi(colour: string): string;
+    },
+    termWidth: number
+): string[] {
+    const margin = 2;
+    const cellChars = 2; // each cell is ██ (2 chars wide)
+    const availCols = Math.max(
+        10,
+        Math.floor((termWidth - margin) / cellChars)
+    );
+    const logicalRows = data.contextWindow >= 1_000_000 ? 10 : 6;
+    const cols = Math.min(availCols, 40);
+    const totalPixels = cols * logicalRows;
+
+    const pixels = buildPixels(data, cols, logicalRows);
+    const lines: string[] = [];
+
+    // Render using half-blocks: 2 logical rows per terminal line
+    for (let y = 0; y < logicalRows; y += 2) {
+        let line = " ".repeat(margin - 1);
+
+        for (let x = 0; x < cols; x++) {
+            const topIdx = y * cols + x;
+            const bottomIdx = (y + 1) * cols + x;
+            const top = pixels[topIdx];
+            const bottom = bottomIdx < totalPixels ? pixels[bottomIdx] : null;
+
+            const topC = top?.colour ?? "";
+            const botC = bottom?.colour ?? "";
+
+            if (topC && botC) {
+                if (topC === botC) {
+                    // Same colour: solid block
+                    line += theme.fg(topC, FILLED + FILLED);
+                } else {
+                    // Different colours: ▀ with fg=top, bg=bottom
+                    const topAnsi = theme.getFgAnsi(topC);
+                    const botBg = fgToBg(topAnsi);
+                    line += topAnsi + botBg + UPPER + UPPER + "\x1b[0m";
+                }
+            } else if (topC && !botC) {
+                // Colour on top, free below
+                line += theme.fg(topC, UPPER + UPPER);
+            } else if (!topC && botC) {
+                // Free on top, colour below
+                line += theme.fg(botC, LOWER + LOWER);
+            } else {
+                // Both free: subtle dot pattern
+                line += theme.fg("dim", "··");
+            }
+        }
+
+        lines.push(line);
     }
 
-    // Trim overflow
-    squares.length = totalSquares;
+    return lines;
+}
 
-    // Convert to rows
-    const grid: GridSquare[][] = [];
-    for (let r = 0; r < rows; r++) {
-        grid.push(squares.slice(r * cols, (r + 1) * cols));
-    }
+// ─── Progress bar ────────────────────────────────────────────────────
 
-    // Build legend
-    const legend: string[] = [];
+function renderProgressBar(
+    data: ContextData,
+    theme: { fg(colour: string, text: string): string },
+    termWidth: number
+): string {
+    const pct = data.percent ?? 0;
+    const barWidth = Math.min(termWidth - 12, 50);
+    const filled = Math.round((pct / 100) * barWidth);
+    const empty = barWidth - filled;
+
+    const severityColour =
+        pct >= 80 ? "error" : pct >= 50 ? "warning" : "success";
+
+    const filledBar = theme.fg(severityColour, FILLED.repeat(filled));
+    const emptyBar = theme.fg("dim", "─".repeat(empty));
+    const pctStr = theme.fg(severityColour, `${pct}%`.padStart(4));
+
+    return ` ${filledBar}${emptyBar} ${pctStr}`;
+}
+
+// ─── Legend ───────────────────────────────────────────────────────────
+
+export function renderLegend(
+    data: ContextData,
+    theme: { fg(colour: string, text: string): string }
+): string[] {
+    const lines: string[] = [];
     const visibleCats = data.categories.filter(
         (c) => c.tokens > 0 && c.name !== "Free space" && !c.isDeferred
     );
-    const maxName = Math.max(
-        ...visibleCats.map((c) => c.name.length),
-        ...visibleCats.map((c) => c.name.length),
-        "Free space".length
+    const reservedCat = data.categories.find(
+        (c) => c.name === "Autocompact buffer" || c.name === "Compact buffer"
     );
+    const freeCat = data.categories.find((c) => c.name === "Free space");
+
+    const allNames = [
+        ...visibleCats.map((c) => c.name),
+        "Free space",
+        ...(reservedCat ? [reservedCat.name] : []),
+    ];
+    const maxName = Math.max(...allNames.map((n) => n.length));
 
     for (const cat of visibleCats) {
         const pct = ((cat.tokens / data.contextWindow) * 100).toFixed(1);
         const sym = theme.fg(cat.colour, FILLED);
         const pad = " ".repeat(maxName - cat.name.length + 1);
-        legend.push(
+        lines.push(
             `${sym} ${cat.name}:${pad}${formatTokens(cat.tokens)} tokens (${pct}%)`
         );
     }
 
-    // Free space
-    const freeCat = data.categories.find((c) => c.name === "Free space");
     if (freeCat && freeCat.tokens > 0) {
         const pct = ((freeCat.tokens / data.contextWindow) * 100).toFixed(1);
-        const sym = theme.fg("dim", EMPTY);
+        const sym = theme.fg("dim", "·");
         const pad = " ".repeat(maxName - "Free space".length + 1);
-        legend.push(
+        lines.push(
             `${sym} Free space:${pad}${formatTokens(freeCat.tokens)} tokens (${pct}%)`
         );
     }
 
-    // Reserved
-    if (reservedCategory && reservedCategory.tokens > 0) {
-        const pct = (
-            (reservedCategory.tokens / data.contextWindow) *
-            100
-        ).toFixed(1);
-        const sym = theme.fg("dim", "\u2593");
-        const pad = " ".repeat(maxName - reservedCategory.name.length + 1);
-        legend.push(
-            `${sym} ${reservedCategory.name}:${pad}${formatTokens(reservedCategory.tokens)} tokens (${pct}%)`
+    if (reservedCat && reservedCat.tokens > 0) {
+        const pct = ((reservedCat.tokens / data.contextWindow) * 100).toFixed(
+            1
+        );
+        const sym = theme.fg(reservedCat.colour, DARK_SHADE);
+        const pad = " ".repeat(maxName - reservedCat.name.length + 1);
+        lines.push(
+            `${sym} ${reservedCat.name}:${pad}${formatTokens(reservedCat.tokens)} tokens (${pct}%)`
         );
     }
 
-    return { grid, legend };
+    return lines;
 }
 
-// ─── UI component (mirrors CC ContextVisualization) ──────────────────
+// ─── UI component ─────────────────────────────────────────────────────
 
 class ContextViewComponent implements Component {
     private data: ContextData;
     private suggestions: ContextSuggestion[];
-    private theme: { fg(colour: string, text: string): string };
+    private theme: {
+        fg(colour: string, text: string): string;
+        getFgAnsi(colour: string): string;
+    };
     private cachedLines: string[] | null = null;
     private cachedWidth = 0;
 
     constructor(
         data: ContextData,
         suggestions: ContextSuggestion[],
-        theme: { fg(colour: string, text: string): string }
+        theme: {
+            fg(colour: string, text: string): string;
+            getFgAnsi(colour: string): string;
+        }
     ) {
         this.data = data;
         this.suggestions = suggestions;
@@ -724,7 +783,7 @@ class ContextViewComponent implements Component {
         const tokenStr = formatTokens(data.totalTokens);
         const windowStr = formatTokens(data.contextWindow);
         const pctStr = data.percent !== null ? `${data.percent}%` : "estimated";
-        lines.push(theme.fg("accent", "Context Usage"));
+        lines.push(theme.fg("accent", theme.fg("accent", "Context Usage")));
         lines.push(
             theme.fg(
                 "dim",
@@ -733,20 +792,20 @@ class ContextViewComponent implements Component {
         );
         lines.push("");
 
-        // ── Grid ────────────────────────────────────────────────────
-        const { grid, legend } = buildGrid(data, theme);
-        for (const row of grid) {
-            let line = " ";
-            for (const sq of row) {
-                line += theme.fg(sq.colour, sq.symbol);
-            }
+        // ── Grid (half-block, double-width) ─────────────────────────
+        const gridLines = renderGridLines(data, theme, width);
+        for (const line of gridLines) {
             lines.push(line);
         }
+
+        // ── Progress bar ────────────────────────────────────────────
+        lines.push("");
+        lines.push(renderProgressBar(data, theme, width));
         lines.push("");
 
         // ── Legend ──────────────────────────────────────────────────
         lines.push(theme.fg("dim", "Estimated usage by category"));
-        for (const leg of legend) {
+        for (const leg of renderLegend(data, theme)) {
             lines.push(leg);
         }
 

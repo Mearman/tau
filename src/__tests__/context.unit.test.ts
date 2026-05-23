@@ -5,7 +5,8 @@ import {
     formatTokens,
     roughTokens,
     analyseContext,
-    buildGrid,
+    buildPixels,
+    renderLegend,
     generateSuggestions,
 } from "../features/context.ts";
 
@@ -399,10 +400,10 @@ void describe("analyseContext", () => {
     });
 });
 
-// ─── buildGrid ──────────────────────────────────────────────────────
+// ─── buildPixels ───────────────────────────────────────────────────
 
-void describe("buildGrid", () => {
-    void it("fills the grid to totalSquares (100 for 200k)", () => {
+void describe("buildPixels", () => {
+    void it("fills cols × rows (200k)", () => {
         const data = analyseContext(
             [],
             "sys",
@@ -411,14 +412,11 @@ void describe("buildGrid", () => {
             200_000,
             "test"
         );
-        const { grid } = buildGrid(data, THEME);
-        let total = 0;
-        for (const row of grid) total += row.length;
-        assert.equal(total, 100);
-        assert.equal(grid.length, 10); // 10 rows
+        const pixels = buildPixels(data, 20, 6);
+        assert.equal(pixels.length, 120);
     });
 
-    void it("uses 20×10 grid for 1M+ context", () => {
+    void it("fills cols × rows (1M+)", () => {
         const data = analyseContext(
             [],
             "sys",
@@ -427,14 +425,39 @@ void describe("buildGrid", () => {
             1_000_000,
             "test"
         );
-        const { grid } = buildGrid(data, THEME);
-        let total = 0;
-        for (const row of grid) total += row.length;
-        assert.equal(total, 200);
-        assert.equal(grid.length, 10);
+        const pixels = buildPixels(data, 30, 10);
+        assert.equal(pixels.length, 300);
     });
 
-    void it("has legend entries for categories, free space, and buffer", () => {
+    void it("all pixels have a colour or empty string", () => {
+        const data = analyseContext(
+            [],
+            "sys",
+            NO_TOOLS,
+            60_000,
+            200_000,
+            "test"
+        );
+        const pixels = buildPixels(data, 20, 6);
+        for (const p of pixels) {
+            assert.ok(typeof p.colour === "string");
+        }
+    });
+
+    void it("handles zero-token state", () => {
+        const data = analyseContext([], "", NO_TOOLS, 0, 200_000, "test");
+        const pixels = buildPixels(data, 20, 6);
+        assert.equal(pixels.length, 120);
+        // All should be free (empty colour) except reserved buffer
+        const nonEmpty = pixels.filter((p) => p.colour !== "");
+        assert.ok(nonEmpty.length > 0, "should have at least the buffer");
+    });
+});
+
+// ─── renderLegend ────────────────────────────────────────────────────
+
+void describe("renderLegend", () => {
+    void it("has entries for categories, free space, and buffer", () => {
         const data = analyseContext(
             [],
             "sys",
@@ -443,16 +466,13 @@ void describe("buildGrid", () => {
             200_000,
             "test"
         );
-        const { legend } = buildGrid(data, THEME);
+        const legend = renderLegend(data, THEME);
         assert.ok(legend.length >= 3);
     });
 
     void it("handles zero-token state", () => {
         const data = analyseContext([], "", NO_TOOLS, 0, 200_000, "test");
-        const { grid, legend } = buildGrid(data, THEME);
-        let total = 0;
-        for (const row of grid) total += row.length;
-        assert.equal(total, 100);
+        const legend = renderLegend(data, THEME);
         assert.ok(legend.length >= 1);
     });
 });
