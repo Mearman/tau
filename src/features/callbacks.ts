@@ -51,7 +51,7 @@ export interface ScheduledCallback {
 
 const DURATION_RE = /^(\d+(?:\.\d+)?)(s|m|h|d)$/;
 
-function parseDurationToMs(input: string): number | null {
+export function parseDurationToMs(input: string): number | null {
     const match = input.match(DURATION_RE);
     if (!match) return null;
     const value = parseFloat(match[1]);
@@ -65,7 +65,7 @@ function parseDurationToMs(input: string): number | null {
     return value * units[unit];
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
     const abs = Math.abs(ms);
     if (abs < 60_000) return `${Math.round(abs / 1_000)}s`;
     if (abs < 3_600_000) return `${Math.round(abs / 60_000)}m`;
@@ -73,7 +73,7 @@ function formatDuration(ms: number): string {
     return `${Math.round(abs / 86_400_000)}d`;
 }
 
-function formatRelative(isoDate: string): string {
+export function formatRelative(isoDate: string): string {
     const ms = new Date(isoDate).getTime() - Date.now();
     if (ms <= 0) return "overdue";
     return `in ${formatDuration(ms)}`;

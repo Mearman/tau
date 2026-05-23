@@ -62,7 +62,7 @@ export function chooseBackgroundPath(
 }
 
 /** Messages that carry a content field (user/assistant/toolResult). */
-interface ContentMessage {
+export interface ContentMessage {
     role: string;
     content: string | { type: string; text?: string }[];
 }
@@ -79,7 +79,7 @@ function isContentMessageEntry(
 }
 
 /** Extract text from a content field (string or array of content blocks). */
-function extractTextFromContent(
+export function extractTextFromContent(
     content: string | { type: string; text?: string }[]
 ): string {
     if (typeof content === "string") return content;
@@ -99,7 +99,7 @@ function extractTextFromContent(
 /**
  * Extract the last assistant message text from session entries.
  */
-function extractLastAssistantSummary(entries: SessionEntry[]): string {
+export function extractLastAssistantSummary(entries: SessionEntry[]): string {
     for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
         if (
@@ -115,7 +115,7 @@ function extractLastAssistantSummary(entries: SessionEntry[]): string {
 /**
  * Extract the original user prompt from session entries.
  */
-function extractOriginalPrompt(entries: SessionEntry[]): string {
+export function extractOriginalPrompt(entries: SessionEntry[]): string {
     for (const entry of entries) {
         if (isContentMessageEntry(entry) && entry.message.role === "user") {
             return extractTextFromContent(entry.message.content).slice(0, 2000);
@@ -127,7 +127,7 @@ function extractOriginalPrompt(entries: SessionEntry[]): string {
 /**
  * Estimate the byte size of the conversation from session entries.
  */
-function estimateConversationBytes(entries: SessionEntry[]): number {
+export function estimateConversationBytes(entries: SessionEntry[]): number {
     let bytes = 0;
     for (const entry of entries) {
         if (isContentMessageEntry(entry)) {

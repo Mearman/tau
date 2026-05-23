@@ -1,37 +1,20 @@
 /**
- * Tests for the callbacks feature — duration parsing and formatting.
+ * Tests for the callbacks feature — duration parsing, formatting, and relative time.
+ *
+ * All tests import directly from the source module.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import {
+    parseDurationToMs,
+    formatDuration,
+    formatRelative,
+} from "../features/callbacks.ts";
 
-// --- Duration parsing (replicated from callbacks.ts for unit testing) ---
+// ─── Duration parsing ────────────────────────────────────────────────
 
-const DURATION_RE = /^(\d+(?:\.\d+)?)(s|m|h|d)$/;
-
-function parseDurationToMs(input: string): number | null {
-    const match = input.match(DURATION_RE);
-    if (!match) return null;
-    const value = parseFloat(match[1]);
-    const unit = match[2];
-    const units: Record<string, number> = {
-        s: 1_000,
-        m: 60_000,
-        h: 3_600_000,
-        d: 86_400_000,
-    };
-    return value * units[unit];
-}
-
-function formatDuration(ms: number): string {
-    const abs = Math.abs(ms);
-    if (abs < 60_000) return `${Math.round(abs / 1_000)}s`;
-    if (abs < 3_600_000) return `${Math.round(abs / 60_000)}m`;
-    if (abs < 86_400_000) return `${Math.round(abs / 3_600_000)}h`;
-    return `${Math.round(abs / 86_400_000)}d`;
-}
-
-void describe("callback duration parsing", () => {
+void describe("callback parseDurationToMs", () => {
     void it("parses seconds", () => {
         assert.equal(parseDurationToMs("30s"), 30_000);
         assert.equal(parseDurationToMs("1s"), 1_000);
@@ -65,7 +48,9 @@ void describe("callback duration parsing", () => {
     });
 });
 
-void describe("callback duration formatting", () => {
+// ─── Duration formatting ─────────────────────────────────────────────
+
+void describe("callback formatDuration", () => {
     void it("formats seconds", () => {
         assert.equal(formatDuration(30_000), "30s");
         assert.equal(formatDuration(500), "1s");
@@ -84,5 +69,35 @@ void describe("callback duration formatting", () => {
     void it("formats days", () => {
         assert.equal(formatDuration(86_400_000), "1d");
         assert.equal(formatDuration(172_800_000), "2d");
+    });
+});
+
+// ─── Relative time formatting ────────────────────────────────────────
+
+void describe("callback formatRelative", () => {
+    void it("shows 'overdue' for past timestamps", () => {
+        const past = new Date(Date.now() - 10_000).toISOString();
+        assert.equal(formatRelative(past), "overdue");
+    });
+
+    void it("shows 'in Ns' for seconds away", () => {
+        const future = new Date(Date.now() + 30_000).toISOString();
+        const result = formatRelative(future);
+        assert.ok(result.startsWith("in "));
+        assert.ok(result.endsWith("s"));
+    });
+
+    void it("shows 'in Nm' for minutes away", () => {
+        const future = new Date(Date.now() + 300_000).toISOString();
+        const result = formatRelative(future);
+        assert.ok(result.startsWith("in "));
+        assert.ok(result.endsWith("m"));
+    });
+
+    void it("shows 'in Nh' for hours away", () => {
+        const future = new Date(Date.now() + 7_200_000).toISOString();
+        const result = formatRelative(future);
+        assert.ok(result.startsWith("in "));
+        assert.ok(result.endsWith("h"));
     });
 });

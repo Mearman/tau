@@ -1,157 +1,26 @@
 /**
- * Tests for /loop context inference helpers.
+ * Tests for /loop feature — parsing, inference, and formatting.
+ *
+ * All tests import directly from the source module.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import {
+    parseDuration,
+    parseCron,
+    extractCompletionPromise,
+    parseLoopArgs,
+    formatDuration,
+    inferInterval,
+    inferPrompt,
+    truncatePrompt,
+} from "../features/loop.ts";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
-// We need to import the functions under test. They're module-private,
-// so we test via the parseLoopArgs public interface and verify inference
-// by checking the behaviour of the exported command handler indirectly.
-//
-// For the inference helpers, we replicate the logic in testable wrappers
-// that mirror the implementation. This avoids the need to export internals.
+// ─── Duration parsing ────────────────────────────────────────────────
 
-// --- Test the interval inference logic directly ---
-
-// Replicate INTERVAL_HINTS for testing
-const INTERVAL_HINTS: Array<{
-    pattern: RegExp;
-    ms: number;
-    human: string;
-}> = [
-    { pattern: /\b(?:watch|monitor|tail|follow)\b/i, ms: 5_000, human: "5s" },
-    {
-        pattern:
-            /\b(?:wait(?:ing)?\s+for|poll(?:ing)?|check(?:ing)?\s+(?:every|in))\b/i,
-        ms: 10_000,
-        human: "10s",
-    },
-    {
-        pattern: /\b(?:deploy|build|compile|ci\b|pipeline)\b/i,
-        ms: 60_000,
-        human: "1m",
-    },
-    {
-        pattern: /\b(?:test|spec|e2e|integration)\b/i,
-        ms: 30_000,
-        human: "30s",
-    },
-    {
-        pattern: /\b(?:status|health|heartbeat|check)\b/i,
-        ms: 60_000,
-        human: "1m",
-    },
-];
-
-function inferIntervalFromText(text: string): {
-    ms: number;
-    human: string;
-} {
-    for (const hint of INTERVAL_HINTS) {
-        if (hint.pattern.test(text)) return { ms: hint.ms, human: hint.human };
-    }
-    return { ms: 300_000, human: "5m" };
-}
-
-void describe("loop interval inference", () => {
-    void it("infers 5s for watch/monitor keywords", () => {
-        assert.deepStrictEqual(inferIntervalFromText("watch the logs"), {
-            ms: 5_000,
-            human: "5s",
-        });
-        assert.deepStrictEqual(inferIntervalFromText("monitor the process"), {
-            ms: 5_000,
-            human: "5s",
-        });
-        assert.deepStrictEqual(inferIntervalFromText("tail -f output.log"), {
-            ms: 5_000,
-            human: "5s",
-        });
-    });
-
-    void it("infers 10s for polling/waiting keywords", () => {
-        assert.deepStrictEqual(
-            inferIntervalFromText("waiting for the deploy"),
-            {
-                ms: 10_000,
-                human: "10s",
-            }
-        );
-        assert.deepStrictEqual(inferIntervalFromText("poll the endpoint"), {
-            ms: 10_000,
-            human: "10s",
-        });
-    });
-
-    void it("infers 1m for deploy/build keywords", () => {
-        assert.deepStrictEqual(inferIntervalFromText("deploy to production"), {
-            ms: 60_000,
-            human: "1m",
-        });
-        assert.deepStrictEqual(inferIntervalFromText("build the project"), {
-            ms: 60_000,
-            human: "1m",
-        });
-        assert.deepStrictEqual(inferIntervalFromText("CI pipeline"), {
-            ms: 60_000,
-            human: "1m",
-        });
-    });
-
-    void it("infers 30s for test keywords", () => {
-        assert.deepStrictEqual(inferIntervalFromText("run the test suite"), {
-            ms: 30_000,
-            human: "30s",
-        });
-        assert.deepStrictEqual(inferIntervalFromText("e2e tests"), {
-            ms: 30_000,
-            human: "30s",
-        });
-    });
-
-    void it("infers 5m default for unknown text", () => {
-        assert.deepStrictEqual(inferIntervalFromText("write documentation"), {
-            ms: 300_000,
-            human: "5m",
-        });
-        assert.deepStrictEqual(inferIntervalFromText(""), {
-            ms: 300_000,
-            human: "5m",
-        });
-    });
-
-    void it("picks the first matching hint (watch wins over check)", () => {
-        // "watch" (5s) comes before "check" (1m) in the hints array
-        assert.deepStrictEqual(
-            inferIntervalFromText("watch and check the status"),
-            { ms: 5_000, human: "5s" }
-        );
-    });
-});
-
-// --- Test parseLoopArgs (public interface) ---
-
-// Import the module to test parseLoopArgs indirectly
-// Since parseLoopArgs is not exported, we test the parsing
-// by replicating the key parsing rules
-
-function parseDuration(token: string): { ms: number; human: string } | null {
-    const match = token.match(/^(\d+)([smhd])$/);
-    if (!match) return null;
-    const value = parseInt(match[1], 10);
-    const unit = match[2];
-    const units: Record<string, [number, string]> = {
-        s: [1000, "s"],
-        m: [60_000, "m"],
-        h: [3_600_000, "h"],
-        d: [86_400_000, "d"],
-    };
-    const [multiplier, suffix] = units[unit];
-    return { ms: value * multiplier, human: `${value}${suffix}` };
-}
-
-void describe("loop duration parsing", () => {
+void describe("loop parseDuration", () => {
     void it("parses seconds", () => {
         assert.deepStrictEqual(parseDuration("30s"), {
             ms: 30_000,
@@ -189,24 +58,229 @@ void describe("loop duration parsing", () => {
     });
 });
 
-// --- Test truncatePrompt ---
+// ─── Cron parsing ────────────────────────────────────────────────────
 
-function truncatePrompt(text: string): string {
-    const MAX_PROMPT_LENGTH = 200;
-    if (text.length <= MAX_PROMPT_LENGTH) return text;
-    const truncated = text.slice(0, MAX_PROMPT_LENGTH);
-    const lastSentence = Math.max(
-        truncated.lastIndexOf("."),
-        truncated.lastIndexOf("!"),
-        truncated.lastIndexOf("?")
-    );
-    if (lastSentence > MAX_PROMPT_LENGTH * 0.5) {
-        return truncated.slice(0, lastSentence + 1).trim();
-    }
-    return truncated.trim() + "…";
-}
+void describe("loop parseCron", () => {
+    void it("parses every-N-minutes", () => {
+        assert.deepStrictEqual(parseCron("*/5 * * * *"), {
+            ms: 300_000,
+            human: "every 5m",
+        });
+    });
 
-void describe("loop prompt truncation", () => {
+    void it("parses every-N-hours", () => {
+        assert.deepStrictEqual(parseCron("0 */2 * * *"), {
+            ms: 7_200_000,
+            human: "every 2h",
+        });
+    });
+
+    void it("parses every-N-days", () => {
+        assert.deepStrictEqual(parseCron("0 0 */3 * *"), {
+            ms: 259_200_000,
+            human: "every 3d",
+        });
+    });
+
+    void it("returns null for invalid expressions", () => {
+        assert.equal(parseCron("* * *"), null);
+        assert.equal(parseCron("hello world foo bar baz"), null);
+    });
+
+    void it("returns null for unsupported patterns", () => {
+        // Specific minute + specific hour is not a simple periodic pattern
+        assert.equal(parseCron("30 2 * * *"), null);
+    });
+});
+
+// ─── Completion promise extraction ────────────────────────────────────
+
+void describe("loop extractCompletionPromise", () => {
+    void it("returns null when flag is absent", () => {
+        const result = extractCompletionPromise("do something");
+        assert.equal(result.completionPromise, null);
+        assert.equal(result.remaining.trim(), "do something");
+    });
+
+    void it("extracts bare flag as default", () => {
+        const result = extractCompletionPromise(
+            "do something --completion-promise"
+        );
+        assert.equal(result.completionPromise, "default");
+    });
+
+    void it("extracts quoted value with =", () => {
+        const result = extractCompletionPromise(
+            'do something --completion-promise="all done"'
+        );
+        assert.equal(result.completionPromise, "all done");
+    });
+
+    void it("extracts unquoted value with =", () => {
+        const result = extractCompletionPromise(
+            "do something --completion-promise=custom-phrase"
+        );
+        assert.equal(result.completionPromise, "custom-phrase");
+    });
+
+    void it("extracts quoted value with space", () => {
+        const result = extractCompletionPromise(
+            'do something --completion-promise "all done"'
+        );
+        assert.equal(result.completionPromise, "all done");
+    });
+});
+
+// ─── parseLoopArgs (integration of all parsers) ───────────────────────
+
+void describe("loop parseLoopArgs", () => {
+    void it("parses count mode", () => {
+        const result = parseLoopArgs("5 do something");
+        assert.equal(result.mode.kind, "count");
+        if (result.mode.kind === "count") {
+            assert.equal(result.mode.count, 5);
+        }
+        assert.equal(result.prompt, "do something");
+    });
+
+    void it("parses interval mode with duration", () => {
+        const result = parseLoopArgs("5m check the deploy");
+        assert.equal(result.mode.kind, "interval");
+        if (result.mode.kind === "interval") {
+            assert.equal(result.mode.ms, 300_000);
+        }
+        assert.equal(result.prompt, "check the deploy");
+    });
+
+    void it("parses infinite mode with no prefix", () => {
+        const result = parseLoopArgs("keep working");
+        assert.equal(result.mode.kind, "infinite");
+        assert.equal(result.prompt, "keep working");
+    });
+
+    void it("parses empty input as infinite with empty prompt", () => {
+        const result = parseLoopArgs("");
+        assert.equal(result.mode.kind, "infinite");
+        assert.equal(result.prompt, "");
+    });
+
+    void it("preserves completion promise", () => {
+        const result = parseLoopArgs(
+            '5m check deploy --completion-promise="deployed"'
+        );
+        assert.equal(result.completionPromise, "deployed");
+    });
+});
+
+// ─── Duration formatting ─────────────────────────────────────────────
+
+void describe("loop formatDuration", () => {
+    void it("formats seconds", () => {
+        assert.equal(formatDuration(30_000), "30s");
+    });
+
+    void it("formats minutes", () => {
+        assert.equal(formatDuration(300_000), "5m");
+    });
+
+    void it("formats hours", () => {
+        assert.equal(formatDuration(7_200_000), "2h");
+    });
+
+    void it("formats days", () => {
+        assert.equal(formatDuration(86_400_000), "1d");
+    });
+});
+
+// ─── Interval inference ──────────────────────────────────────────────
+
+void describe("loop inferInterval", () => {
+    void it("infers 5s for watch keywords", () => {
+        const entries = [makeMessageEntry("user", "watch the logs for errors")];
+        const result = inferInterval(entries);
+        assert.equal(result.ms, 5_000);
+    });
+
+    void it("infers 1m for deploy keywords", () => {
+        const entries = [
+            makeMessageEntry("assistant", "starting the deploy now"),
+        ];
+        const result = inferInterval(entries);
+        assert.equal(result.ms, 60_000);
+    });
+
+    void it("infers 30s for test keywords", () => {
+        const entries = [makeMessageEntry("user", "run the test suite")];
+        const result = inferInterval(entries);
+        assert.equal(result.ms, 30_000);
+    });
+
+    void it("infers 5m default for unrelated text", () => {
+        const entries = [makeMessageEntry("user", "write some documentation")];
+        const result = inferInterval(entries);
+        assert.equal(result.ms, 300_000);
+    });
+
+    void it("infers default for empty entries", () => {
+        const result = inferInterval([]);
+        assert.equal(result.ms, 300_000);
+    });
+
+    void it("picks first matching hint from recent messages", () => {
+        const entries = [
+            makeMessageEntry("user", "build the project"),
+            makeMessageEntry("assistant", "watch the build output"),
+        ];
+        const result = inferInterval(entries);
+        // "watch" (5s) should win over "build" (1m) because it's first in hints
+        assert.equal(result.ms, 5_000);
+    });
+});
+
+// ─── Prompt inference ────────────────────────────────────────────────
+
+void describe("loop inferPrompt", () => {
+    void it("uses last user message as prompt", () => {
+        const entries = [
+            makeMessageEntry("assistant", "building the project"),
+            makeMessageEntry("user", "check the test results"),
+        ];
+        const result = inferPrompt(entries);
+        assert.equal(result, "check the test results");
+    });
+
+    void it("skips tick messages", () => {
+        const entries = [
+            makeMessageEntry("user", "original task"),
+            {
+                type: "message",
+                message: {
+                    role: "user",
+                    content: `<tick>${new Date().toISOString()}</tick>`,
+                },
+            } as SessionEntry,
+        ];
+        const result = inferPrompt(entries);
+        assert.equal(result, "original task");
+    });
+
+    void it("falls back to last assistant message", () => {
+        const entries = [
+            makeMessageEntry("assistant", "running the tests now"),
+        ];
+        const result = inferPrompt(entries);
+        assert.equal(result, "running the tests now");
+    });
+
+    void it("returns default for empty entries", () => {
+        const result = inferPrompt([]);
+        assert.equal(result, "Continue working");
+    });
+});
+
+// ─── Prompt truncation ───────────────────────────────────────────────
+
+void describe("loop truncatePrompt", () => {
     void it("preserves short prompts unchanged", () => {
         assert.equal(truncatePrompt("check the build"), "check the build");
     });
@@ -223,6 +297,15 @@ void describe("loop prompt truncation", () => {
         const long = "a".repeat(300);
         const result = truncatePrompt(long);
         assert.ok(result.endsWith("…"));
-        assert.ok(result.length <= 201); // 200 + ellipsis
+        assert.ok(result.length <= 201);
     });
 });
+
+// ─── Test helpers ────────────────────────────────────────────────────
+
+function makeMessageEntry(role: string, text: string): SessionEntry {
+    return {
+        type: "message",
+        message: { role, content: text },
+    } as SessionEntry;
+}

@@ -39,12 +39,12 @@ const TICK_DELAY_MS = 500;
 
 // --- Parsing ---
 
-type LoopMode =
+export type LoopMode =
     | { kind: "count"; count: number }
     | { kind: "interval"; ms: number; human: string }
     | { kind: "infinite" };
 
-interface ParsedLoop {
+export interface ParsedLoop {
     mode: LoopMode;
     prompt: string;
     // Three states: null = no detection, "default" = built-in patterns, string = custom phrase
@@ -52,7 +52,9 @@ interface ParsedLoop {
     completionPromise: null | "default" | string;
 }
 
-function parseDuration(token: string): { ms: number; human: string } | null {
+export function parseDuration(
+    token: string
+): { ms: number; human: string } | null {
     const match = token.match(/^(\d+)([smhd])$/);
     if (!match) return null;
     const value = parseInt(match[1], 10);
@@ -69,7 +71,7 @@ function parseDuration(token: string): { ms: number; human: string } | null {
 
 const CRON_FIELD_RE = /^([*]\/\d+|\d+|\*(?:\/\d+)?)$/;
 
-function parseCron(expr: string): { ms: number; human: string } | null {
+export function parseCron(expr: string): { ms: number; human: string } | null {
     const fields = expr.trim().split(/\s+/);
     if (fields.length !== 5) return null;
     if (!fields.every((f) => CRON_FIELD_RE.test(f))) return null;
@@ -124,7 +126,7 @@ function parseCron(expr: string): { ms: number; human: string } | null {
  * - `--completion-promise`      → "default"  (built-in done patterns)
  * - `--completion-promise="x"` → "x"        (case-insensitive substring match)
  */
-function extractCompletionPromise(input: string): {
+export function extractCompletionPromise(input: string): {
     remaining: string;
     // Three states: null = no detection, "default" = built-in patterns, string = custom phrase
     // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
@@ -180,7 +182,7 @@ function extractCompletionPromise(input: string): {
     };
 }
 
-function parseLoopArgs(input: string): ParsedLoop {
+export function parseLoopArgs(input: string): ParsedLoop {
     const { remaining, completionPromise } = extractCompletionPromise(input);
     const trimmed = remaining.trim();
     if (!trimmed)
@@ -231,7 +233,7 @@ function parseLoopArgs(input: string): ParsedLoop {
 
 // --- Tick message construction ---
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
     const abs = Math.abs(ms);
     if (abs < 60_000) return `${Math.round(abs / 1000)}s`;
     if (abs < 3_600_000) return `${Math.round(abs / 60_000)}m`;
@@ -362,7 +364,7 @@ function isMessageEntry(
  * Scans the last few messages for keywords that suggest a polling frequency.
  * Returns the first matching hint, or the default (5m).
  */
-function inferInterval(entries: SessionEntry[]): {
+export function inferInterval(entries: SessionEntry[]): {
     ms: number;
     human: string;
     label: string;
@@ -385,7 +387,7 @@ function inferInterval(entries: SessionEntry[]): {
  * 2. Otherwise, if the last assistant message describes ongoing work, derive a prompt.
  * 3. Fall back to "Continue working".
  */
-function inferPrompt(entries: SessionEntry[]): string {
+export function inferPrompt(entries: SessionEntry[]): string {
     const messageEntries = entries.filter(isMessageEntry);
 
     // Walk backwards for the last user message
@@ -415,7 +417,7 @@ function inferPrompt(entries: SessionEntry[]): string {
 }
 
 /** Truncate a prompt to a reasonable length for loop repetition. */
-function truncatePrompt(text: string): string {
+export function truncatePrompt(text: string): string {
     const MAX_PROMPT_LENGTH = 200;
     if (text.length <= MAX_PROMPT_LENGTH) return text;
     // Try to cut at the last sentence boundary before the limit
