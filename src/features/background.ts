@@ -54,7 +54,7 @@ export function silenceJobAfterKill(job: BackgroundJob): void {
 
 // ─── Stall watchdog ─────────────────────────────────────────────────
 
-function startStallWatchdog(
+export function startStallWatchdog(
     jobId: string,
     command: string,
     logPath: string,
