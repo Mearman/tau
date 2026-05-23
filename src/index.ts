@@ -5,7 +5,7 @@
  *
  * Tools: bash (overridden), bash_bg, jobs, job_decide, task
  * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /bookmark, /unbookmark,
- *           /footer, /handoff, /notifications, /preset, /session-name, /summarize
+ *           /context, /footer, /handoff, /notifications, /preset, /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle)
  */
@@ -62,6 +62,7 @@ import { registerPreset } from "./features/preset.ts";
 import { registerLoop } from "./features/loop.ts";
 import { registerSessionName } from "./features/session-name.ts";
 import { registerSummarize } from "./features/summarize.ts";
+import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -85,6 +86,7 @@ export default function (pi: ExtensionAPI) {
     registerLoop(pi);
     registerSessionName(pi);
     registerSummarize(pi);
+    registerContext(pi);
     registerWebBrowse(pi);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
