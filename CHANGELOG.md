@@ -1,3 +1,104 @@
+## [1.5.0](https://github.com/Mearman/tau/compare/v1.4.5...v1.5.0) (2026-05-23)
+
+### Features
+
+* add /context command for token usage visualisation ([8abd2aa](https://github.com/Mearman/tau/commit/8abd2aaf31b6ec7b127c5c965f34e6520642b2c0))
+* add Chrome extension, native bridge, and web browse implementation ([1aed7f1](https://github.com/Mearman/tau/commit/1aed7f1847b9ca3171e17d3b2df327061f9c02ee))
+* add context files and skills as separate categories to /context ([25b8158](https://github.com/Mearman/tau/commit/25b8158fe46cf43c8e3ea58c1676accef3d7afc4))
+* add reload tool for model-initiated configuration reload ([50b0ce0](https://github.com/Mearman/tau/commit/50b0ce0a82f8ca57309fc1c1e2653590b0f777be))
+* add web browse tools (chrome_list, web_browse, web_screenshot, web_interact) ([abe850e](https://github.com/Mearman/tau/commit/abe850ea336af2f01d77557e6e9cc2485afdc084))
+* background agent tool with context continuity (phase 4) ([4466441](https://github.com/Mearman/tau/commit/44664413b847f76d0e2d320691ed1f0925dbfcae))
+* file-first output + promise-race backgrounding (phase 1) ([ee22d08](https://github.com/Mearman/tau/commit/ee22d08b33e510338a26573d1c5577ff4f0ae53c))
+* foreground task registry with visual indicators (phase 2) ([de83b1a](https://github.com/Mearman/tau/commit/de83b1ae94cd169243b036bd73c9310e48dd3127))
+* improve grid rendering with half-blocks and progress bar ([3c1c05d](https://github.com/Mearman/tau/commit/3c1c05dd5a5990acec83de16d2358f1679702e46))
+* infer loop interval and prompt from conversation context ([828b0d2](https://github.com/Mearman/tau/commit/828b0d2df2662f0cbdb5782a3bc9f43e4352d6e5))
+* integrate bookmark extension ([2e8ed57](https://github.com/Mearman/tau/commit/2e8ed57df21bc1b4fb443e7915555db8908702b4))
+* integrate claude-rules extension ([c6fa22f](https://github.com/Mearman/tau/commit/c6fa22fd2b08d034a318b7c6262ebb5ae963c446))
+* integrate custom-footer extension ([5a8dcf3](https://github.com/Mearman/tau/commit/5a8dcf341136efcefa10901a4394f41e4eaf6b51))
+* integrate git-checkpoint extension ([64febe2](https://github.com/Mearman/tau/commit/64febe2136cae1f65871def37db5e6f3c16f513b))
+* integrate github-issue-autocomplete extension ([ec5c78d](https://github.com/Mearman/tau/commit/ec5c78d84bc0b77f9c2f2d9e2818f9af33d12dc0))
+* integrate handoff extension ([e05f1c1](https://github.com/Mearman/tau/commit/e05f1c142379178dfb9d8e763a48dd797f3e4200))
+* integrate preset extension ([1406fee](https://github.com/Mearman/tau/commit/1406feee638ba9b4e27039150afe504920b090b7))
+* integrate session-name extension ([506e299](https://github.com/Mearman/tau/commit/506e2990ac559dee2ca999645b8cce71df3706ec))
+* integrate summarize extension ([f27dd73](https://github.com/Mearman/tau/commit/f27dd73d75d4f6d4a98fd8807c85ca4944f393c3))
+* interactive loop manager TUI and Ctrl+L shortcut ([6b4a4fe](https://github.com/Mearman/tau/commit/6b4a4febef452238a87f997c2ac79ce137f94319))
+* **loop:** add /loop command with count, duration, cron, and proactive modes ([b12fb55](https://github.com/Mearman/tau/commit/b12fb55d9b282e4494e655274425e60873865e02))
+* **loop:** register loop feature in tau entry point ([b572a0f](https://github.com/Mearman/tau/commit/b572a0f666dfbe2273176316cf4d8c2a96c5c1d2))
+* **notify:** add Pushover notification provider ([b3deb7c](https://github.com/Mearman/tau/commit/b3deb7c661fa6579ea7a4a41b23a987f54ceebf7))
+* **notify:** extract provider architecture for pluggable notification backends ([416bd5f](https://github.com/Mearman/tau/commit/416bd5ffbbbae896ab825dfee28f486f8ade0a63))
+* **notify:** scope notification titles to session context ([035a144](https://github.com/Mearman/tau/commit/035a14426674ccbda82d921180e87f6c6066e309))
+* register /context command in tau extension entry point ([e7c4f85](https://github.com/Mearman/tau/commit/e7c4f8582dbff492382db3fca54ca91149bdcf22))
+* replace todo tool with task tool (nesting, links, status) ([f5876a3](https://github.com/Mearman/tau/commit/f5876a33435bb0050308b6b72494fbb0428430b0))
+* scheduled and external callbacks (remind tool + /remind command) ([d72fccb](https://github.com/Mearman/tau/commit/d72fccb0a6065d4954a6fce86c42866f202ca1c8))
+* use taller, narrower grid proportions ([61090d6](https://github.com/Mearman/tau/commit/61090d610efceed26d5dd1a43e53ce9a9d1f17fb))
+
+### Bug Fixes
+
+* **bg:** respect explicit bash timeout instead of always using 15s default ([fb64047](https://github.com/Mearman/tau/commit/fb6404720f1adce2974eb6d5b1a9af0358c4ec6d))
+* **bg:** suppress duplicate completion notifications after attach ([4356f28](https://github.com/Mearman/tau/commit/4356f28aff8b45e16a289ff32a06c0f68b21e632))
+* **ci:** restore config file typechecking via *.config.ts glob ([fdc3b1c](https://github.com/Mearman/tau/commit/fdc3b1c0590ce99a9ab9503b1b8c3174342db70e))
+* clear pendingDecisionJobId when job is not found ([608eca0](https://github.com/Mearman/tau/commit/608eca05e33665721ca73a774a60b76424a9fd3a))
+* correct grid aspect ratio for square appearance ([90600c7](https://github.com/Mearman/tau/commit/90600c71eb524dfac1757d4d580dc50417acba0c))
+* exclude commitlint.config.ts from tsc ([4e44ecb](https://github.com/Mearman/tau/commit/4e44ecbf22f873a505ec47d7b4d49614989e98ce))
+* fire-and-forget reload to avoid deadlock with agent loop ([a6ae067](https://github.com/Mearman/tau/commit/a6ae067bd75f16dad202f5e9f632e5825a5541b2))
+* **jobs:** suppress duplicate notifications after killing a background job ([2e57dad](https://github.com/Mearman/tau/commit/2e57dada569c2ffda70c3ef700735c2dc6e417a2))
+* pass provider/id model to spawned pi -p ([892597a](https://github.com/Mearman/tau/commit/892597ae7ff0bc7cb37d87abbfb4300137d560a1))
+* poll ctx.isIdle() before calling reload ([0b9932b](https://github.com/Mearman/tau/commit/0b9932b4bd737618985152ae3bd520c311fe4e8e))
+* **release:** correct files field to include src/ directory ([d434132](https://github.com/Mearman/tau/commit/d4341324f9e34a39b98fe36f7544215c6fa0e95c))
+* resolve job IDs without job- prefix ([8e25193](https://github.com/Mearman/tau/commit/8e25193e35f066912d3f5c624e3d72c33d7a7bd5))
+* three runtime bugs found during live testing ([c9e5c10](https://github.com/Mearman/tau/commit/c9e5c10fbaab9abbb97c6f3dfa3ad3304673e16e))
+
+### Refactoring
+
+* change local .js imports to .ts for test-runner compatibility ([41730d1](https://github.com/Mearman/tau/commit/41730d14ce5daf22ce5e41a9ed315ed48ba8fec3))
+* export startStallWatchdog for agent-background consumption ([f600131](https://github.com/Mearman/tau/commit/f6001315768e07119835abc473cba34d2b21f24d))
+* extract background commands into src/features/background-commands.ts ([125edcb](https://github.com/Mearman/tau/commit/125edcb557176441d2ee3ffbe494b9971f102101))
+* extract background jobs into src/features/background.ts ([e449b92](https://github.com/Mearman/tau/commit/e449b921aa467fe6ffb73059f53bd5f382fe27f4))
+* extract notifications into src/features/notifications.ts ([fd2eea5](https://github.com/Mearman/tau/commit/fd2eea50ac596631725bf54df4435afca437e358))
+* extract plan mode into src/features/plan-mode.ts ([ecd8c51](https://github.com/Mearman/tau/commit/ecd8c5136021bb9e6309bf3ca769780e04c93496))
+* extract shared mutable state into src/state.ts ([18376a8](https://github.com/Mearman/tau/commit/18376a886af740dd124659045e30d0ad103ec57a))
+* extract shared type definitions into src/types.ts ([6b06756](https://github.com/Mearman/tau/commit/6b067561ad9eb18710c49ff84b477db15ccdbbb1))
+* extract shared utilities into src/utils.ts ([11f31a3](https://github.com/Mearman/tau/commit/11f31a388582b2323720cbeb8d493b35e6a55b8c))
+* extract titlebar spinner into src/features/titlebar.ts ([e60eba6](https://github.com/Mearman/tau/commit/e60eba6354d34ec4aba3b2893ab38de5ff26e568))
+* extract todo feature into src/features/todo.ts ([3ab5930](https://github.com/Mearman/tau/commit/3ab59300c11290622d901712216029ba41348c24))
+* extract tools selector into src/features/tools-selector.ts ([656522f](https://github.com/Mearman/tau/commit/656522f139d0d658017d1d8c582bd66cf2123363))
+* rewrite index.ts as slim entry point ([8785998](https://github.com/Mearman/tau/commit/8785998fc00bfe5b9d7a4f57ddc7dee266dd7851))
+* **task:** replace parentId field with child-of link model ([5dec2be](https://github.com/Mearman/tau/commit/5dec2bee53881e14ac60fd833401cdcf2a254b9e))
+
+### Documentation
+
+* fix installation section — remove duplicate, add GitHub install ([2eeb8e1](https://github.com/Mearman/tau/commit/2eeb8e1a443c833b66ef88af9aa0ad912dce9a1f))
+* **release:** update package description with τ branding ([0d68f03](https://github.com/Mearman/tau/commit/0d68f032595b210701e86521d3cdd63bb09bae93))
+* update README for task feature (nesting, links, status) ([0e1f507](https://github.com/Mearman/tau/commit/0e1f5076177fd287d92da509937d4e834c5f5337))
+* update README with all new features, commands, and architecture ([9461fd0](https://github.com/Mearman/tau/commit/9461fd0c76916ef14b4909a223348c1e7b91e922))
+
+### Tests
+
+* add 55 tests for task feature (nesting, links, move, remove) ([3cdfae4](https://github.com/Mearman/tau/commit/3cdfae4fd9bb7a79f3e2421badd778716b0c0513))
+* add test framework and initial test suite ([4f9894c](https://github.com/Mearman/tau/commit/4f9894c439cdc0c480cbc5ab1f6d5940346e3eea))
+* add tests for claude-rules ([809a827](https://github.com/Mearman/tau/commit/809a827e3c36dc631a4944ff1f59900bcb44ae49))
+* add tests for github-autocomplete ([e2e5bc4](https://github.com/Mearman/tau/commit/e2e5bc469dbbfc65a1c84bbecb1307c0aff15ceb))
+* add tests for handoff ([2f2acd1](https://github.com/Mearman/tau/commit/2f2acd12a96d8324dbaf827bfb6fb502314755ab))
+* add tests for notifications ([9eda7dd](https://github.com/Mearman/tau/commit/9eda7dd3b04a9123128524ba8bda0c087ebf49e3))
+* add tests for plan-mode ([5ef2f00](https://github.com/Mearman/tau/commit/5ef2f0014e95c3f01f18a184069a2b508fccbeb0))
+* add tests for preset ([7a8a454](https://github.com/Mearman/tau/commit/7a8a454980fca523d9c06ce17f74bf1911d279f2))
+* add tests for summarize ([e9484a9](https://github.com/Mearman/tau/commit/e9484a91e45ef7c4f78b5f930d41253900573e2d))
+* add tests for titlebar ([37bdb00](https://github.com/Mearman/tau/commit/37bdb00915cbc0fb90f167494f62aa136dae8444))
+* add tests for tools-selector ([3bee591](https://github.com/Mearman/tau/commit/3bee591e2ec430a135837b530439341d30840f1e))
+* add unit tests for /context command ([1af0f70](https://github.com/Mearman/tau/commit/1af0f70243cc644335c98db55023a027b38effa9))
+* add unit tests for plan-utils and utils ([7bb4bc1](https://github.com/Mearman/tau/commit/7bb4bc115a488f55449637cde082fddb91e560fe))
+* command policy unit tests (phase 3) ([b71890b](https://github.com/Mearman/tau/commit/b71890b6025f23e9b6f7ea140a1ebe8cd6e7e1ab))
+* comprehensive unit tests for all new features ([0ca86bb](https://github.com/Mearman/tau/commit/0ca86bbe1dc65bbb2c1e92e72d43a25ee728afdf))
+* **task:** add regression test for renderer crash on empty details ([8ce5d5f](https://github.com/Mearman/tau/commit/8ce5d5f505b7749f1f902c2918d43c5dba1dcd32))
+* update context tests for context files and skills categories ([ced9b0f](https://github.com/Mearman/tau/commit/ced9b0f4b8b5f250a62992c91f69b1a1a27c7caa))
+
+### Build
+
+* add c8 coverage tool with yargs override for Node 26 ([9a201ac](https://github.com/Mearman/tau/commit/9a201ac950b5a03ada0feb8d66c62be02abc54f0))
+* add loop to commitlint scope enum ([4acf56a](https://github.com/Mearman/tau/commit/4acf56af9d156f04c2b1b13f8783d345171611e5))
+* add task to commitlint scope enum ([32c836f](https://github.com/Mearman/tau/commit/32c836f997659fe395a7a1c285676c4daf887832))
+* configure c8 coverage with .c8rc.json ([e138a8d](https://github.com/Mearman/tau/commit/e138a8dd168198496f9d628208dc0eee9e38ab80))
+
 ## [1.4.5](https://github.com/Mearman/tau/compare/v1.4.4...v1.4.5) (2026-05-15)
 
 ### Styles
