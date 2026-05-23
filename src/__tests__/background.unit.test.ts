@@ -581,3 +581,32 @@ void describe("detectBlockedSleep", () => {
         assert.equal(detectBlockedSleep("make && sleep 5"), null);
     });
 });
+
+// ─── Background agent helpers ───────────────────────────────────────────
+
+import { chooseBackgroundPath } from "../features/agent-background.ts";
+
+void describe("chooseBackgroundPath", () => {
+    void it("chooses fork when conversation is small", () => {
+        // 4KB conversation, 128K context window → ~1K tokens / 128K = ~0.8%
+        assert.equal(chooseBackgroundPath(4096, 131072), "fork");
+    });
+
+    void it("chooses summary when conversation exceeds 40% of context", () => {
+        // 250KB / 4 = 62.5K tokens / 128K = ~49% → summary
+        assert.equal(chooseBackgroundPath(250000, 128000), "summary");
+    });
+
+    void it("chooses fork at exactly 39%", () => {
+        // boundary is bytes < 1.6 * tokens. 128000 * 1.6 = 204800
+        assert.equal(chooseBackgroundPath(204000, 128000), "fork");
+    });
+
+    void it("chooses summary at exactly 41%", () => {
+        assert.equal(chooseBackgroundPath(205000, 128000), "summary");
+    });
+
+    void it("defaults to fork for empty conversation", () => {
+        assert.equal(chooseBackgroundPath(0, 32768), "fork");
+    });
+});

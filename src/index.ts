@@ -39,6 +39,7 @@ import {
 // Existing features
 import { registerBackgroundJobs } from "./features/background.ts";
 import { registerBackgroundCommands } from "./features/background-commands.ts";
+import { registerAgentBackground } from "./features/agent-background.ts";
 import { registerPlanMode } from "./features/plan-mode.ts";
 import { registerTask, reconstructTaskState } from "./features/task.ts";
 import {
@@ -72,6 +73,7 @@ export default function (pi: ExtensionAPI) {
 
     registerBackgroundJobs(pi, state);
     registerBackgroundCommands(pi, state);
+    registerAgentBackground(pi, state);
     registerPlanMode(pi, state);
     registerTask(pi, state);
     registerToolsSelector(pi, state);

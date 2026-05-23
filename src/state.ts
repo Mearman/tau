@@ -25,6 +25,11 @@ export class TauState {
     agentStartTime: number | undefined;
     agentTimer: ReturnType<typeof setInterval> | null = null;
 
+    // ── Background agent context ──────────────────────────────────────
+
+    /** Model context window in tokens. Used by agent_bg to choose fork vs summary. */
+    contextWindowTokens?: number;
+
     // ── Plan mode ────────────────────────────────────────────────────
 
     planModeEnabled = false;
