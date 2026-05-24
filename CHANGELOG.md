@@ -1,3 +1,9 @@
+## [1.5.1](https://github.com/Mearman/tau/compare/v1.5.0...v1.5.1) (2026-05-24)
+
+### Bug Fixes
+
+* clean up terminal jobs from backgroundJobs map ([8ab6a7a](https://github.com/Mearman/tau/commit/8ab6a7a4da6bbd1c64954e45641aae7c7ba9253e))
+
 ## [1.5.0](https://github.com/Mearman/tau/compare/v1.4.5...v1.5.0) (2026-05-23)
 
 ### Features
