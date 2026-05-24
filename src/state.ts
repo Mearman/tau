@@ -20,6 +20,13 @@ export class TauState {
     agentBackgrounded = false;
     pendingDecisionJobId: string | undefined;
 
+    /** Lifetime counters for terminal jobs (for status bar summary). */
+    completedJobCount = 0;
+    failedJobCount = 0;
+
+    /** Recent terminal jobs kept for `jobs output` lookups (max 20). */
+    recentTerminalJobs: BackgroundJob[] = [];
+
     // ── Agent timing ─────────────────────────────────────────────────
 
     agentStartTime: number | undefined;

@@ -162,14 +162,11 @@ export function updateWidget(state: TauState, ctx: UiContext): void {
     }
     ctx.ui.setWidget("background-jobs", pills);
 
-    const completedJobs = allJobs.filter(
-        (job) => job.status === "completed"
-    ).length;
-    const failedJobs = allJobs.filter((job) => job.status === "failed").length;
-
     let statusText = `${runningJobs.length} running`;
-    if (completedJobs > 0) statusText += `, ${completedJobs} done`;
-    if (failedJobs > 0) statusText += `, ${failedJobs} failed`;
+    if (state.completedJobCount > 0)
+        statusText += `, ${state.completedJobCount} done`;
+    if (state.failedJobCount > 0)
+        statusText += `, ${state.failedJobCount} failed`;
 
     ctx.ui.setStatus(
         "background-jobs",
@@ -179,7 +176,8 @@ export function updateWidget(state: TauState, ctx: UiContext): void {
 
 /**
  * Look up a job by ID. Tries exact match first, then falls back to
- * prepending "job-" to handle LLMs that strip the prefix.
+ * prepending "job-" to handle LLMs that strip the prefix. Also checks
+ * recent terminal jobs for completed/failed/killed lookups.
  */
 export function lookupJob(
     state: TauState,
@@ -187,7 +185,8 @@ export function lookupJob(
 ): BackgroundJob | undefined {
     return (
         state.backgroundJobs.get(jobId) ??
-        state.backgroundJobs.get(`job-${jobId}`)
+        state.backgroundJobs.get(`job-${jobId}`) ??
+        state.recentTerminalJobs.find((j) => j.id === jobId || j.id === `job-${jobId}`)
     );
 }
 
@@ -204,6 +203,23 @@ export function clearPendingDecision(
         state.pendingDecisionJobId = undefined;
 }
 
+/** Maximum number of recent terminal jobs kept for output lookups. */
+const MAX_RECENT_TERMINAL = 20;
+
+/** Remove a terminal job from the background jobs map and update counters. */
+function removeJob(state: TauState, job: BackgroundJob): void {
+    state.backgroundJobs.delete(job.id);
+    if (state.pendingDecisionJobId === job.id) {
+        state.pendingDecisionJobId = undefined;
+    }
+    if (job.status === "completed") state.completedJobCount++;
+    if (job.status === "failed") state.failedJobCount++;
+    state.recentTerminalJobs.push(job);
+    if (state.recentTerminalJobs.length > MAX_RECENT_TERMINAL) {
+        state.recentTerminalJobs.shift();
+    }
+}
+
 /** Send a structured completion notification to the agent. */
 export function notifyCompletion(
     job: BackgroundJob,
@@ -211,7 +227,10 @@ export function notifyCompletion(
     pi: ExtensionAPI,
     ctx: UiContext
 ): void {
-    if (job.outputConsumed) return;
+    if (job.outputConsumed) {
+        removeJob(state, job);
+        return;
+    }
     const duration = formatDuration(Date.now() - job.startTime);
     const emoji = job.status === "completed" ? "✅" : "❌";
     const statusText = `Background ${job.id} ${job.status} (${duration})`;
@@ -239,6 +258,8 @@ export function notifyCompletion(
         },
         { deliverAs: "followUp", triggerTurn: true }
     );
+
+    removeJob(state, job);
 }
 
 // ── Background a running foreground process (signal-based) ─────────
@@ -776,8 +797,12 @@ export function registerBackgroundJobs(
         ): Promise<AgentToolResult<undefined>> {
             switch (params.action) {
                 case "list": {
-                    const jobs = Array.from(state.backgroundJobs.values());
-                    const lines = jobs.map((j) => formatJobLine(j));
+                    const running = Array.from(state.backgroundJobs.values());
+                    const recent = state.recentTerminalJobs.slice(-5).reverse();
+                    const lines = [
+                        ...running.map((j) => formatJobLine(j)),
+                        ...recent.map((j) => formatJobLine(j)),
+                    ];
                     return {
                         content: [
                             {

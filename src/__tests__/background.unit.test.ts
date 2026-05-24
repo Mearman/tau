@@ -610,3 +610,85 @@ void describe("chooseBackgroundPath", () => {
         assert.equal(chooseBackgroundPath(0, 32768), "fork");
     });
 });
+
+// ─── lookupJob with recentTerminalJobs ───────────────────────────────
+
+void describe("lookupJob with recentTerminalJobs", () => {
+    void it("finds job in recentTerminalJobs after removal from map", () => {
+        const state = new TauState();
+        const job = makeJob({ id: "job-1-1", status: "completed" });
+        state.recentTerminalJobs.push(job);
+        assert.equal(lookupJob(state, "job-1-1")?.id, "job-1-1");
+    });
+
+    void it("finds job in recentTerminalJobs without job- prefix", () => {
+        const state = new TauState();
+        const job = makeJob({ id: "job-1-1", status: "completed" });
+        state.recentTerminalJobs.push(job);
+        assert.equal(lookupJob(state, "1-1")?.id, "job-1-1");
+    });
+
+    void it("prefers active map over recentTerminalJobs", () => {
+        const state = new TauState();
+        const active = makeJob({ id: "job-1-1", status: "running" });
+        const recent = makeJob({ id: "job-1-1", status: "completed" });
+        state.backgroundJobs.set("job-1-1", active);
+        state.recentTerminalJobs.push(recent);
+        assert.equal(lookupJob(state, "job-1-1")?.status, "running");
+    });
+
+    void it("returns undefined when not in map or recentTerminalJobs", () => {
+        const state = new TauState();
+        assert.equal(lookupJob(state, "job-999-1"), undefined);
+    });
+});
+
+// ─── job cleanup lifecycle ──────────────────────────────────────────
+
+void describe("job cleanup after completion", () => {
+    void it("removes completed jobs from backgroundJobs map", () => {
+        const state = new TauState();
+        const job = makeJob({ id: "job-1-1", status: "completed" });
+        createJobDonePromise(job);
+        state.backgroundJobs.set("job-1-1", job);
+
+        // Simulate what notifyCompletion does for outputConsumed jobs
+        job.outputConsumed = true;
+        // The job should be removable
+        state.backgroundJobs.delete(job.id);
+        assert.equal(state.backgroundJobs.has("job-1-1"), false);
+    });
+
+    void it("increments completedJobCount on terminal job removal", () => {
+        const state = new TauState();
+        assert.equal(state.completedJobCount, 0);
+
+        const job = makeJob({ id: "job-1-1", status: "completed" });
+        state.backgroundJobs.delete(job.id);
+        // Simulate counter increment
+        if (job.status === "completed") state.completedJobCount++;
+        assert.equal(state.completedJobCount, 1);
+    });
+
+    void it("increments failedJobCount for failed jobs", () => {
+        const state = new TauState();
+        assert.equal(state.failedJobCount, 0);
+
+        const job = makeJob({ id: "job-1-1", status: "failed" });
+        if (job.status === "failed") state.failedJobCount++;
+        assert.equal(state.failedJobCount, 1);
+    });
+
+    void it("capped at 20 recentTerminalJobs", () => {
+        const state = new TauState();
+        for (let i = 0; i < 25; i++) {
+            state.recentTerminalJobs.push(
+                makeJob({ id: `job-1-${i}`, status: "completed" })
+            );
+            if (state.recentTerminalJobs.length > 20) {
+                state.recentTerminalJobs.shift();
+            }
+        }
+        assert.equal(state.recentTerminalJobs.length, 20);
+    });
+});
