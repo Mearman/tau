@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerHandoff } from "../features/handoff.ts";
+import { TauState } from "../state.ts";
 
 void describe("handoff /handoff command", () => {
     function captureCommand() {
@@ -13,7 +14,7 @@ void describe("handoff /handoff command", () => {
                 commandHandler = def.handler;
             },
         } as never;
-        registerHandoff(pi);
+        registerHandoff(pi, new TauState());
         return { commandHandler };
     }
 

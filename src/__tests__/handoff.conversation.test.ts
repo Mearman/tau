@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerHandoff } from "../features/handoff.ts";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { TauState } from "../state.ts";
 
 void describe("handoff /handoff command — with conversation", () => {
     function captureCommand() {
@@ -14,7 +15,7 @@ void describe("handoff /handoff command — with conversation", () => {
                 commandHandler = def.handler;
             },
         } as never;
-        registerHandoff(pi);
+        registerHandoff(pi, new TauState());
         return { commandHandler };
     }
 

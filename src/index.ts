@@ -5,7 +5,8 @@
  *
  * Tools: bash (overridden), bash_bg, jobs, job_decide, task
  * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /bookmark, /unbookmark,
- *           /context, /footer, /handoff, /notifications, /preset, /session-name, /summarize
+ *           /context, /footer, /handoff, /handover, /notifications, /preset,
+ *           /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle)
  */
@@ -86,7 +87,7 @@ export default function (pi: ExtensionAPI) {
     registerCustomFooter(pi);
     registerGitCheckpoint(pi);
     registerGithubAutocomplete(pi);
-    registerHandoff(pi);
+    registerHandoff(pi, state);
     registerPreset(pi);
     registerLoop(pi);
     registerSessionName(pi);
@@ -140,6 +141,18 @@ export default function (pi: ExtensionAPI) {
         }
 
         return {};
+    });
+
+    pi.on("tool_result", async (event) => {
+        // Track file paths accessed by read/edit/write for handoff directory detection.
+        if (
+            (event.toolName === "read" ||
+                event.toolName === "edit" ||
+                event.toolName === "write") &&
+            typeof event.input.path === "string"
+        ) {
+            state.accessedFilePaths.push(event.input.path);
+        }
     });
 
     pi.on("turn_start", async (_event, ctx) => {

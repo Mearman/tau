@@ -78,4 +78,9 @@ export class TauState {
 
     titlebarTimer: ReturnType<typeof setInterval> | null = null;
     titlebarFrameIndex = 0;
+
+    // ── File path tracking (for handoff directory detection) ─────────
+
+    /** Ordered list of file paths accessed by read/edit/write tools, newest last. */
+    accessedFilePaths: string[] = [];
 }
