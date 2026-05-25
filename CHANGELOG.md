@@ -1,3 +1,9 @@
+## [1.5.2](https://github.com/Mearman/tau/compare/v1.5.1...v1.5.2) (2026-05-25)
+
+### Bug Fixes
+
+* use root index.ts entry point for correct extension display name ([e5c5968](https://github.com/Mearman/tau/commit/e5c5968c64c06a39921ca86bedf1f603006a8ab8))
+
 ## [1.5.1](https://github.com/Mearman/tau/compare/v1.5.0...v1.5.1) (2026-05-24)
 
 ### Bug Fixes
