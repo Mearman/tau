@@ -34,6 +34,7 @@ import {
     stopTitlebarSpinner,
     startAgentTimer,
     stopAgentTimer,
+    showAgentTurnComplete,
 } from "./features/titlebar.ts";
 
 // Existing features
@@ -400,8 +401,11 @@ After completing a step, include a [DONE:n] tag in your response.`,
     });
 
     pi.on("agent_end", async (event, ctx) => {
+        // Stop timers and clear start time — guaranteed cleanup before
+        // any fallible logic below. The interval's self-terminating guard
+        // will also catch a surviving interval on its next tick.
         stopTitlebarSpinner(pi, state, ctx);
-        stopAgentTimer(state, ctx);
+        showAgentTurnComplete(state, ctx);
         state.agentStartTime = undefined;
 
         // ── Plan-mode: completion detection ──────────────────────────
@@ -505,6 +509,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
     pi.on("session_shutdown", async (_event, ctx) => {
         stopTitlebarSpinner(pi, state, ctx);
+        stopAgentTimer(state);
+        state.agentStartTime = undefined;
 
         pi.appendEntry("background-tasks-state", {
             jobs: Array.from(state.backgroundJobs.entries()).map(

@@ -5,6 +5,7 @@ import {
     stopTitlebarSpinner,
     startAgentTimer,
     stopAgentTimer,
+    showAgentTurnComplete,
 } from "../features/titlebar.ts";
 import { TauState } from "../state.ts";
 
@@ -100,7 +101,7 @@ void describe("agent timer", () => {
         clearInterval(state.agentTimer);
     });
 
-    void it("stopAgentTimer clears timer and sets elapsed status", () => {
+    void it("stopAgentTimer clears timer without writing status", () => {
         const state = new TauState();
         state.agentStartTime = Date.now() - 5000;
         state.agentTimer = setInterval(() => {}, 10000);
@@ -113,24 +114,56 @@ void describe("agent timer", () => {
             },
         } as never;
 
-        stopAgentTimer(state, ctx);
+        stopAgentTimer(state);
+
+        assert.equal(state.agentTimer, null);
+        assert.equal(statuses.length, 0);
+    });
+
+    void it("stopAgentTimer does nothing when no timer", () => {
+        const state = new TauState();
+        state.agentTimer = null;
+        state.agentStartTime = undefined;
+
+        stopAgentTimer(state);
+        assert.equal(state.agentTimer, null);
+    });
+
+    void it("showAgentTurnComplete clears timer and sets elapsed status", () => {
+        const state = new TauState();
+        state.agentStartTime = Date.now() - 5000;
+        state.agentTimer = setInterval(() => {}, 10000);
+        const statuses: { name: string; content: unknown }[] = [];
+        const ctx = {
+            ui: {
+                setStatus: (name: string, content: unknown) =>
+                    statuses.push({ name, content }),
+                theme: { fg: (_c: string, t: string) => t },
+            },
+        } as never;
+
+        showAgentTurnComplete(state, ctx);
 
         assert.equal(state.agentTimer, null);
         assert.ok(statuses.some((s) => s.name === "tau-turn"));
     });
 
-    void it("stopAgentTimer does nothing when no timer and no start time", () => {
+    void it("showAgentTurnComplete does nothing when agentStartTime is undefined", () => {
         const state = new TauState();
         state.agentTimer = null;
         state.agentStartTime = undefined;
+        const statuses: { name: string; content: unknown }[] = [];
         const ctx = {
             ui: {
-                setStatus: () => {},
+                setStatus: (name: string, content: unknown) =>
+                    statuses.push({ name, content }),
                 theme: { fg: (_c: string, t: string) => t },
             },
         } as never;
 
-        stopAgentTimer(state, ctx);
+        showAgentTurnComplete(state, ctx);
+
         assert.equal(state.agentTimer, null);
+        assert.equal(statuses.length, 0);
     });
 });

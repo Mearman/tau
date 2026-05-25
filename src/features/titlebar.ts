@@ -9,6 +9,30 @@ import path from "node:path";
 
 const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+// Global registry of all agent-timer interval IDs. Stored on globalThis so
+// it survives across jiti module re-evaluations. Each startAgentTimer call
+// kills ALL previously registered intervals before starting a new one.
+const REGISTRY_KEY = "__pi_tau_agent_timer_ids__" as const;
+
+function killAllAgentTimers(): void {
+    const ids = (globalThis as Record<string, unknown>)[REGISTRY_KEY] as
+        | ReturnType<typeof setInterval>[]
+        | undefined;
+    if (ids) {
+        for (const id of ids) clearInterval(id);
+    }
+    (globalThis as Record<string, unknown>)[REGISTRY_KEY] = [];
+}
+
+function registerAgentTimer(id: ReturnType<typeof setInterval>): void {
+    const ids = (globalThis as Record<string, unknown>)[REGISTRY_KEY] as
+        | ReturnType<typeof setInterval>[]
+        | undefined;
+    if (ids) {
+        ids.push(id);
+    }
+}
+
 export function getTitleBase(pi: ExtensionAPI): string {
     const cwd = path.basename(process.cwd());
     const session = pi.getSessionName();
@@ -51,9 +75,17 @@ export function startAgentTimer(
         };
     }
 ): void {
-    stopAgentTimer(state, ctx);
+    stopAgentTimer(state);
+    // Kill ALL agent-timer intervals from any previous extension instance
+    // (including pre-reload zombies that have no self-termination logic).
+    killAllAgentTimers();
+
     state.agentTimer = setInterval(() => {
-        if (state.agentStartTime === undefined) return;
+        if (state.agentStartTime === undefined) {
+            clearInterval(state.agentTimer!);
+            state.agentTimer = null;
+            return;
+        }
         const elapsed = formatDuration(Date.now() - state.agentStartTime);
         const spinner = ctx.ui.theme.fg("accent", "●");
         ctx.ui.setStatus(
@@ -61,9 +93,25 @@ export function startAgentTimer(
             spinner + ctx.ui.theme.fg("dim", ` ${elapsed}`)
         );
     }, 1_000);
+    registerAgentTimer(state.agentTimer);
 }
 
-export function stopAgentTimer(
+/**
+ * Clear the agent-turn elapsed timer. Pure cleanup — no visual side effect.
+ * To display the ✓ completion state, call showAgentTurnComplete() instead.
+ */
+export function stopAgentTimer(state: TauState): void {
+    if (state.agentTimer) {
+        clearInterval(state.agentTimer);
+        state.agentTimer = null;
+    }
+}
+
+/**
+ * Stop the timer and display the final ✓ <elapsed> status.
+ * Call only when the agent finishes entirely (agent_end), not between turns.
+ */
+export function showAgentTurnComplete(
     state: TauState,
     ctx: {
         ui: {
@@ -72,10 +120,7 @@ export function stopAgentTimer(
         };
     }
 ): void {
-    if (state.agentTimer) {
-        clearInterval(state.agentTimer);
-        state.agentTimer = null;
-    }
+    stopAgentTimer(state);
     if (state.agentStartTime !== undefined) {
         const elapsed = formatDuration(Date.now() - state.agentStartTime);
         const check = ctx.ui.theme.fg("success", "✓");
