@@ -1,3 +1,9 @@
+## [1.6.0](https://github.com/Mearman/tau/compare/v1.5.2...v1.6.0) (2026-05-25)
+
+### Features
+
+* add /handover command with cross-directory launch modes ([90c1c37](https://github.com/Mearman/tau/commit/90c1c37f175da90068b4243c20d09cfab5df6196))
+
 ## [1.5.2](https://github.com/Mearman/tau/compare/v1.5.1...v1.5.2) (2026-05-25)
 
 ### Bug Fixes
