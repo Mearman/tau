@@ -5,5 +5,5 @@
  * so eslint --fix handles both linting and formatting.
  */
 export default {
-    "*.ts": ["eslint --cache --fix"],
+    "*.ts": ["node node_modules/.bin/eslint --cache --fix"],
 };
