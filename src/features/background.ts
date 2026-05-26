@@ -1280,8 +1280,12 @@ async function executeTmuxForeground(
         if (initialResult !== null) {
             state.backgroundJobs.delete(jobId);
             const output = await readFile(logPath, "utf-8").catch(() => "");
-            // Clean up tmux window
+            // Clean up tmux window and session if empty
             killWindow(tmuxCtx.windowId);
+            // Kill the session if this was the last window (cleans up idle initial shells)
+            execSafe(
+                `tmux kill-session -t ${shellQuote(tmuxCtx.session)} 2>/dev/null`
+            );
             if (initialResult !== 0 && initialResult !== null) {
                 throw new Error(
                     output || `Command exited with code ${initialResult}`
@@ -1390,6 +1394,9 @@ async function executeTmuxForeground(
 
         const output = await readFile(logPath, "utf-8").catch(() => "");
         killWindow(tmuxCtx.windowId);
+        execSafe(
+            `tmux kill-session -t ${shellQuote(tmuxCtx.session)} 2>/dev/null`
+        );
 
         if (raceResult.code !== 0 && raceResult.code !== null) {
             throw new Error(
@@ -1410,4 +1417,4 @@ async function executeTmuxForeground(
 
 // ─── Helpers used by executeTmuxForeground ──────────────────────────
 
-import { checkExitCode, killWindow } from "../tmux.ts";
+import { checkExitCode, killWindow, execSafe, shellQuote } from "../tmux.ts";
