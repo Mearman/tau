@@ -643,6 +643,258 @@ void describe("lookupJob with recentTerminalJobs", () => {
     });
 });
 
+// ─── registerBackgroundJob — proc close cleanup ──────────────────────
+
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
+
+/**
+ * Create a mock ChildProcess that emits "close" when requested.
+ * Uses EventEmitter to simulate proc.on("close", ...).
+ */
+function mockProc(
+    pid: number
+): ChildProcess & { emitClose(code: number): void } {
+    const ee = new EventEmitter() as ChildProcess & {
+        emitClose(code: number): void;
+    };
+    ee.pid = pid;
+    ee.emitClose = (code: number) => {
+        ee.emit("close", code);
+    };
+    return ee;
+}
+
+void describe("registerBackgroundJob — proc close cleanup", () => {
+    void it("removes job from backgroundJobs map when process exits", async () => {
+        // We need registerBackgroundJob exported to test this directly.
+        // This test will fail at import time until the function is exported.
+        const { registerBackgroundJob: _rbg } =
+            await import("../features/background.ts");
+
+        const state = new TauState();
+        const proc = mockProc(-77777);
+
+        const pi = {
+            registerTool() {},
+            sendMessage() {},
+        } as never;
+
+        const ctx = {
+            ui: {
+                notify() {},
+                setWidget() {},
+                setStatus() {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const job = _rbg(
+            proc,
+            "/tmp/test-bg-job.log",
+            "echo hello",
+            "tc-bg-1",
+            state,
+            pi,
+            ctx
+        );
+
+        // Job should be in the map
+        assert.equal(state.backgroundJobs.has(job.id), true);
+        assert.equal(job.status, "running");
+
+        // Simulate process exit
+        proc.emitClose(0);
+
+        // After close: job should be cleaned up
+        assert.equal(
+            state.backgroundJobs.has(job.id),
+            false,
+            "job must be removed from backgroundJobs after proc closes"
+        );
+        assert.equal(
+            job.status,
+            "completed",
+            "job status must be updated to completed"
+        );
+    });
+
+    void it("marks job as failed on non-zero exit", async () => {
+        const { registerBackgroundJob: _rbg } =
+            await import("../features/background.ts");
+
+        const state = new TauState();
+        const proc = mockProc(-77778);
+
+        const pi = {
+            registerTool() {},
+            sendMessage() {},
+        } as never;
+
+        const ctx = {
+            ui: {
+                notify() {},
+                setWidget() {},
+                setStatus() {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const job = _rbg(
+            proc,
+            "/tmp/test-bg-job-fail.log",
+            "exit 1",
+            "tc-bg-2",
+            state,
+            pi,
+            ctx
+        );
+
+        proc.emitClose(1);
+
+        assert.equal(
+            job.status,
+            "failed",
+            "job status must be failed on non-zero exit"
+        );
+        assert.equal(job.exitCode, 1, "exit code must be recorded");
+        assert.equal(
+            state.backgroundJobs.has(job.id),
+            false,
+            "failed job must also be removed from backgroundJobs"
+        );
+    });
+
+    void it("resolves donePromise when process exits", async () => {
+        const { registerBackgroundJob: _rbg } =
+            await import("../features/background.ts");
+
+        const state = new TauState();
+        const proc = mockProc(-77779);
+
+        const pi = {
+            registerTool() {},
+            sendMessage() {},
+        } as never;
+
+        const ctx = {
+            ui: {
+                notify() {},
+                setWidget() {},
+                setStatus() {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const job = _rbg(
+            proc,
+            "/tmp/test-bg-done.log",
+            "echo done",
+            "tc-bg-3",
+            state,
+            pi,
+            ctx
+        );
+
+        assert.ok(job.donePromise, "donePromise must exist");
+
+        // donePromise should resolve when proc closes
+        const promise = job.donePromise;
+        proc.emitClose(0);
+        await promise; // Should resolve, not hang
+
+        assert.equal(job.status, "completed");
+    });
+
+    void it("notifies agent of completion", async () => {
+        const { registerBackgroundJob: _rbg } =
+            await import("../features/background.ts");
+
+        const state = new TauState();
+        const proc = mockProc(-77780);
+        const sentMessages: unknown[] = [];
+
+        const pi = {
+            registerTool() {},
+            sendMessage(msg: unknown) {
+                sentMessages.push(msg);
+            },
+        } as never;
+
+        const ctx = {
+            ui: {
+                notify() {},
+                setWidget() {},
+                setStatus() {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        const job = _rbg(
+            proc,
+            "/tmp/test-bg-notify.log",
+            "echo notify",
+            "tc-bg-4",
+            state,
+            pi,
+            ctx
+        );
+
+        proc.emitClose(0);
+
+        assert.equal(
+            sentMessages.length,
+            1,
+            "must send one completion notification"
+        );
+        const msg = sentMessages[0] as { customType: string; content: string };
+        assert.equal(msg.customType, "job-completion");
+        assert.ok(msg.content.includes(job.id));
+    });
+
+    void it("increments completedJobCount after cleanup", async () => {
+        const { registerBackgroundJob: _rbg } =
+            await import("../features/background.ts");
+
+        const state = new TauState();
+        const proc = mockProc(-77781);
+
+        const pi = {
+            registerTool() {},
+            sendMessage() {},
+        } as never;
+
+        const ctx = {
+            ui: {
+                notify() {},
+                setWidget() {},
+                setStatus() {},
+                theme: { fg: () => "" },
+            },
+        } as never;
+
+        assert.equal(state.completedJobCount, 0);
+
+        const job = _rbg(
+            proc,
+            "/tmp/test-bg-counter.log",
+            "echo count",
+            "tc-bg-5",
+            state,
+            pi,
+            ctx
+        );
+
+        proc.emitClose(0);
+
+        assert.equal(
+            state.completedJobCount,
+            1,
+            "completedJobCount must increment"
+        );
+    });
+});
+
 // ─── job cleanup lifecycle ──────────────────────────────────────────
 
 void describe("job cleanup after completion", () => {
