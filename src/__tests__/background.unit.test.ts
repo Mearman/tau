@@ -895,6 +895,63 @@ void describe("registerBackgroundJob — proc close cleanup", () => {
     });
 });
 
+// ─── jobs attach — dead process detection ─────────────────────────────
+
+void describe("jobs attach — dead process detection", () => {
+    void it("returns immediately when job process is dead and donePromise is unresolved", async () => {
+        const state = new TauState();
+        // Use a PID that is guaranteed not to exist as an OS process.
+        // 999999998 is in the upper range of valid PIDs but essentially
+        // impossible to be running.
+        const deadPid = 999999998;
+        const job = makeJob({
+            id: "job-dead-1",
+            pid: deadPid,
+            status: "running",
+            logPath: "/tmp/pi-bg-job-dead-1.log",
+            toolCallId: "tc-attach-dead",
+        });
+        createJobDonePromise(job);
+        state.backgroundJobs.set("job-dead-1", job);
+
+        // Write a log file so readOutputTail doesn't fail
+        const { writeFileSync } = await import("node:fs");
+        writeFileSync("/tmp/pi-bg-job-dead-1.log", "test output\n");
+
+        const tool = captureJobsTool(state);
+
+        // Race attach against a 2s timeout. If attach hangs, the timeout wins
+        // and the test fails.
+        const attachResult = await Promise.race([
+            tool.execute(
+                "tc-attach-dead",
+                { action: "attach", jobId: "job-dead-1", wait: true },
+                null,
+                null,
+                null
+            ),
+            new Promise<never>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error("attach hung for 2s — donePromise never resolved")),
+                    2_000
+                )
+            ),
+        ]);
+
+        // attach must return (not hang)
+        assert.ok(
+            attachResult.content[0].text.includes("job-dead-1"),
+            "attach must return the job's output"
+        );
+        // job must be marked terminal
+        assert.equal(
+            job.status === "completed" || job.status === "failed",
+            true,
+            `expected completed or failed, got ${job.status}`
+        );
+    });
+});
+
 // ─── job cleanup lifecycle ──────────────────────────────────────────
 
 void describe("job cleanup after completion", () => {
