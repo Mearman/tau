@@ -1049,6 +1049,53 @@ void describe("jobs attach — dead process detection", () => {
     });
 });
 
+// ─── jobs attach — abort signal ────────────────────────────────────────
+
+void describe("jobs attach — abort signal", () => {
+    void it("returns promptly when abort signal fires", async () => {
+        const state = new TauState();
+        const job = makeJob({
+            id: "job-abort-1",
+            pid: process.pid, // a live process so the dead-PID check passes
+            status: "running",
+            logPath: "/tmp/pi-bg-job-abort-1.log",
+            toolCallId: "tc-attach-abort",
+        });
+        createJobDonePromise(job);
+        state.backgroundJobs.set("job-abort-1", job);
+
+        const { writeFileSync } = await import("node:fs");
+        writeFileSync("/tmp/pi-bg-job-abort-1.log", "still running\n");
+
+        const controller = new AbortController();
+        const tool = captureJobsTool(state);
+
+        // Abort after 100ms — attach should return, not hang
+        setTimeout(() => controller.abort(), 100);
+
+        const attachResult = await Promise.race([
+            tool.execute(
+                "tc-attach-abort",
+                { action: "attach", jobId: "job-abort-1", wait: true },
+                controller.signal,
+                null,
+                null
+            ),
+            new Promise<never>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error("attach did not respond to abort within 2s")),
+                    2_000
+                )
+            ),
+        ]);
+
+        assert.ok(
+            attachResult.content[0].text.includes("job-abort-1"),
+            "attach must return the job's output after abort"
+        );
+    });
+});
+
 // ─── job cleanup lifecycle ──────────────────────────────────────────
 
 void describe("job cleanup after completion", () => {
