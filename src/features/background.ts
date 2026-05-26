@@ -887,6 +887,15 @@ export function registerBackgroundJobs(
                     ) {
                         if (!job.donePromise) createJobDonePromise(job);
 
+                        // If the OS process is already dead but markJobTerminal
+                        // was never called (e.g. pre-fix zombie jobs), resolve
+                        // the donePromise now so attach doesn't hang forever.
+                        try {
+                            process.kill(job.pid, 0);
+                        } catch {
+                            markJobTerminal(job, "failed");
+                        }
+
                         onUpdate?.({
                             content: [
                                 {
