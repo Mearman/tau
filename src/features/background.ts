@@ -9,7 +9,10 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
+import type {
+    AgentToolResult,
+    AgentToolUpdateCallback,
+} from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
     createBashTool,
@@ -38,7 +41,6 @@ import {
     readOutputTailSync,
     formatJobLine,
 } from "../utils.ts";
-import { isTmuxAvailable } from "../tmux.ts";
 import {
     attachTmuxContext,
     getTmuxContext,
@@ -47,7 +49,6 @@ import {
     readTmuxOutput,
     spawnBackgroundTmux,
     spawnForegroundTmux,
-    cleanupTmuxRunDir,
     notifyTmuxCompletion,
 } from "./bash-tmux.ts";
 
@@ -420,10 +421,21 @@ export function registerBackgroundJobs(
 
             // ── Tmux path ─────────────────────────────────────────────
             if (state.tmuxAvailable) {
-                return executeTmuxForeground(
-                    toolCallId, command, params, signal, onUpdate, ctx,
-                    state, pi,
-                );
+                try {
+                    return await executeTmuxForeground(
+                        toolCallId,
+                        command,
+                        params,
+                        signal,
+                        onUpdate,
+                        ctx,
+                        state,
+                        pi
+                    );
+                } catch {
+                    // tmux spawn failed (not in git repo, server error, etc.)
+                    // Fall through to direct-spawn path.
+                }
             }
 
             // ── Direct spawn path (fallback when tmux unavailable) ───
@@ -730,9 +742,18 @@ export function registerBackgroundJobs(
                         startStallWatchdog(jobId, command, logPath, pi, () => {
                             killTmuxJob(
                                 state.backgroundJobs.get(jobId) ??
-                                    ({ id: jobId, command, pid: -1, startTime: Date.now(), status: "running", logPath, toolCallId, isBackgrounded: true } satisfies BackgroundJob)
+                                    ({
+                                        id: jobId,
+                                        command,
+                                        pid: -1,
+                                        startTime: Date.now(),
+                                        status: "running",
+                                        logPath,
+                                        toolCallId,
+                                        isBackgrounded: true,
+                                    } satisfies BackgroundJob)
                             );
-                        }),
+                        })
                 );
 
                 updateWidget(state, ctx);
@@ -891,7 +912,10 @@ export function registerBackgroundJobs(
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
                     const output = getTmuxContext(job)
                         ? await readTmuxOutput(job, MAX_OUTPUT_PREVIEW_CHARS)
-                        : await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
+                        : await readOutputTail(
+                              job.logPath,
+                              MAX_OUTPUT_PREVIEW_CHARS
+                          );
                     return {
                         content: [
                             {
@@ -974,11 +998,17 @@ export function registerBackgroundJobs(
 
                         // Race completion against abort so Esc cancels the attach
                         if (signal && !signal.aborted) {
-                            const abortPromise = new Promise<void>((resolve) => {
-                                signal.addEventListener("abort", () => resolve(), {
-                                    once: true,
-                                });
-                            });
+                            const abortPromise = new Promise<void>(
+                                (resolve) => {
+                                    signal.addEventListener(
+                                        "abort",
+                                        () => resolve(),
+                                        {
+                                            once: true,
+                                        }
+                                    );
+                                }
+                            );
                             await Promise.race([job.donePromise, abortPromise]);
                         } else {
                             await job.donePromise;
@@ -1117,14 +1147,14 @@ async function executeTmuxForeground(
     onUpdate: AgentToolUpdateCallback<BashToolDetails | undefined> | undefined,
     ctx: { cwd: string } & UiContext,
     state: TauState,
-    pi: ExtensionAPI,
+    pi: ExtensionAPI
 ): Promise<AgentToolResult<BashToolDetails | undefined>> {
     const jobId = `tmux-${process.pid}-${++state.jobCounter}`;
     let logPath: string;
     let tmuxCtx: import("./bash-tmux.ts").TmuxJobContext;
 
     try {
-        const result = spawnForegroundTmux(command, ctx.cwd, state);
+        const result = spawnForegroundTmux(command, ctx.cwd);
         logPath = result.logPath;
         tmuxCtx = result.tmuxCtx;
     } catch {
@@ -1132,7 +1162,7 @@ async function executeTmuxForeground(
         state.jobCounter--;
         throw new Error(
             "tmux backend requires a git repository. " +
-            "Falling back to direct process management."
+                "Falling back to direct process management."
         );
     }
 
@@ -1182,7 +1212,9 @@ async function executeTmuxForeground(
 
     // Timeout timer
     const timeoutMs =
-        typeof params.timeout === "number" ? params.timeout * 1_000 : DEFAULT_TIMEOUT_MS;
+        typeof params.timeout === "number"
+            ? params.timeout * 1_000
+            : DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => {
         if (!state.runningProcesses.has(toolCallId)) return;
         if (!isAutoBackgroundAllowed(command)) {
@@ -1236,7 +1268,10 @@ async function executeTmuxForeground(
         const initialResult = await Promise.race([
             completionPromise,
             new Promise<null>((resolve) => {
-                const t = setTimeout(resolve, 2_000) as unknown as NodeJS.Timeout;
+                const t = setTimeout(
+                    resolve,
+                    2_000
+                ) as unknown as NodeJS.Timeout;
                 t.unref();
             }),
         ]);
@@ -1248,10 +1283,14 @@ async function executeTmuxForeground(
             // Clean up tmux window
             killWindow(tmuxCtx.windowId);
             if (initialResult !== 0 && initialResult !== null) {
-                throw new Error(output || `Command exited with code ${initialResult}`);
+                throw new Error(
+                    output || `Command exited with code ${initialResult}`
+                );
             }
             return {
-                content: [{ type: "text" as const, text: output || "(no output)" }],
+                content: [
+                    { type: "text" as const, text: output || "(no output)" },
+                ],
                 details: undefined,
             };
         }
@@ -1261,8 +1300,14 @@ async function executeTmuxForeground(
 
         // Race: completion vs background signal
         const raceResult = await Promise.race([
-            completionPromise.then((code) => ({ type: "completed" as const, code })),
-            backgroundSignal.then(() => ({ type: "backgrounded" as const, code: undefined as number | undefined })),
+            completionPromise.then((code) => ({
+                type: "completed" as const,
+                code,
+            })),
+            backgroundSignal.then(() => ({
+                type: "backgrounded" as const,
+                code: undefined as number | undefined,
+            })),
         ]);
 
         if (raceResult.type === "backgrounded") {
@@ -1288,8 +1333,10 @@ async function executeTmuxForeground(
                 clearInterval(bgPoller);
                 markJobTerminal(
                     job,
-                    result.exitCode === 0 || result.exitCode === null ? "completed" : "failed",
-                    result.exitCode ?? 0,
+                    result.exitCode === 0 || result.exitCode === null
+                        ? "completed"
+                        : "failed",
+                    result.exitCode ?? 0
                 );
                 notifyTmuxCompletion(job, state, pi, ctx);
                 updateWidget(state, ctx);
@@ -1345,7 +1392,9 @@ async function executeTmuxForeground(
         killWindow(tmuxCtx.windowId);
 
         if (raceResult.code !== 0 && raceResult.code !== null) {
-            throw new Error(output || `Command exited with code ${raceResult.code}`);
+            throw new Error(
+                output || `Command exited with code ${raceResult.code}`
+            );
         }
 
         return {
@@ -1362,4 +1411,3 @@ async function executeTmuxForeground(
 // ─── Helpers used by executeTmuxForeground ──────────────────────────
 
 import { checkExitCode, killWindow } from "../tmux.ts";
-

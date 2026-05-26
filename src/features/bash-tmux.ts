@@ -12,7 +12,6 @@
 
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { BackgroundJob, UiContext } from "../types.ts";
@@ -26,10 +25,8 @@ import {
     checkExitCode,
     getGitRoot,
     killWindow,
-    sessionExists,
     sessionNameForGitRoot,
     spawnInTmux,
-    type TmuxWindow,
 } from "../tmux.ts";
 
 /** Per-run directory for exit-code sentinels and output files. */
@@ -39,10 +36,18 @@ function runDirPath(): string {
     return dir;
 }
 
-/** Clean up the run directory on shutdown. */
+/** Clean up the run directory on shutdown. Preserves output files for running jobs. */
 export function cleanupTmuxRunDir(): void {
     const dir = `/tmp/pi-tmux-${process.pid}`;
-    try { rmSync(dir, { recursive: true, force: true }); } catch { /* already gone */ }
+    // Don't remove the run directory if there are still running tmux jobs.
+    // The sentinel files and output need to stay alive for the completion poller.
+    // Instead, clean up only the script directory.
+    const scriptDir = join(dir, "s");
+    try {
+        rmSync(scriptDir, { recursive: true, force: true });
+    } catch {
+        /* already gone */
+    }
 }
 
 /**
@@ -67,7 +72,7 @@ export interface TmuxJobContext {
  */
 export function attachTmuxContext(
     job: BackgroundJob,
-    ctx: TmuxJobContext,
+    ctx: TmuxJobContext
 ): void {
     (job as unknown as { tmux: TmuxJobContext }).tmux = ctx;
 }
@@ -83,9 +88,10 @@ export function getTmuxContext(job: BackgroundJob): TmuxJobContext | undefined {
  * Poll for exit-code completion of a tmux-backed background job.
  * Called by the stall watchdog tick to detect completed commands.
  */
-export function pollTmuxCompletion(
-    job: BackgroundJob,
-): { completed: boolean; exitCode?: number } {
+export function pollTmuxCompletion(job: BackgroundJob): {
+    completed: boolean;
+    exitCode?: number;
+} {
     const ctx = getTmuxContext(job);
     if (!ctx) return { completed: false };
 
@@ -106,7 +112,10 @@ export function killTmuxJob(job: BackgroundJob): void {
 /**
  * Read output from a tmux-backed job.
  */
-export function readTmuxOutput(job: BackgroundJob, maxChars: number): Promise<string> {
+export function readTmuxOutput(
+    job: BackgroundJob,
+    maxChars: number
+): Promise<string> {
     const ctx = getTmuxContext(job);
     if (ctx) {
         const output = captureOutput(ctx.windowId, 2000, ctx.outputFile);
@@ -127,7 +136,6 @@ export function readTmuxOutput(job: BackgroundJob, maxChars: number): Promise<st
 export function spawnForegroundTmux(
     command: string,
     cwd: string,
-    state: TauState,
 ): {
     tmuxCtx: TmuxJobContext;
     logPath: string;
@@ -137,7 +145,9 @@ export function spawnForegroundTmux(
     // If not in a git repo, fall through to direct spawn.
     // The caller should check for this.
     if (!gitRoot) {
-        throw new Error("Not in a git repository — tmux backend requires a git root for session naming.");
+        throw new Error(
+            "Not in a git repository — tmux backend requires a git root for session naming."
+        );
     }
 
     const session = sessionNameForGitRoot(gitRoot);
@@ -171,9 +181,13 @@ export function spawnBackgroundTmux(
     state: TauState,
     pi: ExtensionAPI,
     ctx: UiContext,
-    onStartStallWatchdog: (jobId: string, command: string, logPath: string) => () => void,
+    onStartStallWatchdog: (
+        jobId: string,
+        command: string,
+        logPath: string
+    ) => () => void
 ): BackgroundJob {
-    const { tmuxCtx, logPath } = spawnForegroundTmux(command, cwd, state);
+    const { tmuxCtx, logPath } = spawnForegroundTmux(command, cwd);
 
     const jobId = `tmux-${process.pid}-${++state.jobCounter}`;
     const job: BackgroundJob = {
@@ -202,8 +216,10 @@ export function spawnBackgroundTmux(
         cancelStall();
         markJobTerminal(
             job,
-            result.exitCode === 0 || result.exitCode === null ? "completed" : "failed",
-            result.exitCode ?? 0,
+            result.exitCode === 0 || result.exitCode === null
+                ? "completed"
+                : "failed",
+            result.exitCode ?? 0
         );
         notifyTmuxCompletion(job, state, pi, ctx);
     }, 500);
@@ -220,15 +236,18 @@ export function notifyTmuxCompletion(
     job: BackgroundJob,
     state: TauState,
     pi: ExtensionAPI,
-    ctx: UiContext,
+    ctx: UiContext
 ): void {
     if (job.outputConsumed) {
-        // Job was killed — suppress notification.
+        // Job was killed — suppress notification and clean up window.
+        const tmuxCtx = getTmuxContext(job);
+        if (tmuxCtx) killWindow(tmuxCtx.windowId);
         state.backgroundJobs.delete(job.id);
         if (job.status === "completed") state.completedJobCount++;
         if (job.status === "failed") state.failedJobCount++;
         state.recentTerminalJobs.push(job);
-        if (state.recentTerminalJobs.length > 20) state.recentTerminalJobs.shift();
+        if (state.recentTerminalJobs.length > 20)
+            state.recentTerminalJobs.shift();
         return;
     }
 
@@ -260,8 +279,12 @@ export function notifyTmuxCompletion(
                 logPath: job.logPath,
             },
         },
-        { deliverAs: "followUp", triggerTurn: true } as never,
+        { deliverAs: "followUp", triggerTurn: true } as never
     );
+
+    // Clean up the tmux window now the command has finished.
+    const tmuxCtx = getTmuxContext(job);
+    if (tmuxCtx) killWindow(tmuxCtx.windowId);
 
     state.backgroundJobs.delete(job.id);
     if (job.status === "completed") state.completedJobCount++;
