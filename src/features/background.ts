@@ -910,7 +910,17 @@ export function registerBackgroundJobs(
                             details: undefined,
                         });
 
-                        await job.donePromise;
+                        // Race completion against abort so Esc cancels the attach
+                        if (signal && !signal.aborted) {
+                            const abortPromise = new Promise<void>((resolve) => {
+                                signal.addEventListener("abort", () => resolve(), {
+                                    once: true,
+                                });
+                            });
+                            await Promise.race([job.donePromise, abortPromise]);
+                        } else {
+                            await job.donePromise;
+                        }
                     }
 
                     const output = await readOutputTail(
@@ -1019,3 +1029,6 @@ export function registerBackgroundJobs(
         },
     });
 }
+// test
+// test
+// test
