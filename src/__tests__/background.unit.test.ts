@@ -440,6 +440,17 @@ void describe("startTimeoutTimer", () => {
         state.currentlyRunningToolCallId = "tc-timeout-1";
         let triggered = false;
 
+        // Register a mock running process so the guard passes
+        state.runningProcesses.set("tc-timeout-1", {
+            toolCallId: "tc-timeout-1",
+            proc: { pid: -1 } as never,
+            command: "npm test",
+            logPath: "/tmp/test.log",
+            triggerBackground: () => {
+                triggered = true;
+            },
+        });
+
         const timer = startTimeoutTimer(
             () => {
                 triggered = true;
@@ -530,6 +541,43 @@ void describe("startTimeoutTimer", () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
 
         assert.equal(triggered, false, "sleep should not be auto-backgrounded");
+        clearTimeout(timer);
+    });
+
+    void it("triggers background even when toolCallId was overwritten by a concurrent call", async () => {
+        const state = new TauState();
+        state.currentlyRunningToolCallId = "tc-concurrent-1";
+        let triggered = false;
+
+        // Register a mock running process so the guard passes
+        state.runningProcesses.set("tc-concurrent-1", {
+            toolCallId: "tc-concurrent-1",
+            proc: { pid: -1 } as never,
+            command: "npm test",
+            logPath: "/tmp/test.log",
+            triggerBackground: () => {},
+        });
+
+        const timer = startTimeoutTimer(
+            () => {
+                triggered = true;
+            },
+            "npm test",
+            state,
+            "tc-concurrent-1",
+            50
+        );
+
+        // Simulate a second concurrent tool call overwriting the ID
+        state.currentlyRunningToolCallId = "tc-concurrent-2";
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        assert.equal(
+            triggered,
+            true,
+            "triggerBackground must fire for the original call even when overwritten"
+        );
         clearTimeout(timer);
     });
 });
@@ -891,6 +939,55 @@ void describe("registerBackgroundJob — proc close cleanup", () => {
             state.completedJobCount,
             1,
             "completedJobCount must increment"
+        );
+    });
+});
+
+// ─── bash tool — foreground completion cleanup ──────────────────────
+
+function captureBashTool(state: TauState) {
+    let captured: {
+        execute: (
+            toolCallId: string,
+            params: Record<string, unknown>,
+            signal: unknown,
+            onUpdate: unknown,
+            ctx: { cwd: string }
+        ) => Promise<{
+            content: { type: string; text: string }[];
+            details: unknown;
+        }>;
+    } | null = null;
+
+    const pi = {
+        registerTool(tool: { name: string; execute: unknown }) {
+            if (tool.name === "bash") captured = tool as typeof captured;
+        },
+        registerCommand() {},
+        sendMessage() {},
+    } as never;
+
+    registerBackgroundJobs(pi, state);
+    return captured!;
+}
+
+void describe("bash tool — foreground completion cleanup", () => {
+    void it("removes job from backgroundJobs when command completes quickly", async () => {
+        const state = new TauState();
+        const tool = captureBashTool(state);
+
+        await tool.execute(
+            "tc-quick-1",
+            { command: "echo hello" },
+            null,
+            null,
+            { cwd: "/tmp" }
+        );
+
+        assert.equal(
+            state.backgroundJobs.size,
+            0,
+            "foreground job must be removed from backgroundJobs after quick completion"
         );
     });
 });
