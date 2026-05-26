@@ -186,7 +186,9 @@ export function lookupJob(
     return (
         state.backgroundJobs.get(jobId) ??
         state.backgroundJobs.get(`job-${jobId}`) ??
-        state.recentTerminalJobs.find((j) => j.id === jobId || j.id === `job-${jobId}`)
+        state.recentTerminalJobs.find(
+            (j) => j.id === jobId || j.id === `job-${jobId}`
+        )
     );
 }
 
@@ -269,7 +271,7 @@ export function notifyCompletion(
  * and set up completion handlers. Called when the background signal wins
  * the Promise.race (timeout or Ctrl+B).
  */
-function registerBackgroundJob(
+export function registerBackgroundJob(
     proc: import("node:child_process").ChildProcess,
     logPath: string,
     command: string,
@@ -307,8 +309,16 @@ function registerBackgroundJob(
         silenceJobAfterKill(job);
     });
 
-    proc.on("close", () => {
+    proc.on("close", (code) => {
         cancelStall();
+        markJobTerminal(
+            job,
+            code === 0 || code === null ? "completed" : "failed",
+            code ?? 0
+        );
+        clearPendingDecision(state, job);
+        notifyCompletion(job, state, pi, ctx);
+        updateWidget(state, ctx);
     });
 
     ctx.ui.notify(`Process backgrounded as ${jobId}`, "info");
