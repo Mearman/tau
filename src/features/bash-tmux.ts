@@ -10,8 +10,9 @@
  * child-process spawning when tmux is absent.
  */
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { BackgroundJob, UiContext } from "../types.ts";
@@ -47,6 +48,72 @@ export function cleanupTmuxRunDir(): void {
         rmSync(scriptDir, { recursive: true, force: true });
     } catch {
         /* already gone */
+    }
+}
+
+/** Clean up run directories from dead pi processes. Called on session startup. */
+export function cleanupStaleTmuxRunDirs(): void {
+    const entries = readdirSync("/tmp").filter((e) => e.startsWith("pi-tmux-"));
+    for (const entry of entries) {
+        const pid = parseInt(entry.replace("pi-tmux-", ""), 10);
+        // Skip our own process
+        if (pid === process.pid) continue;
+        // Check if the process is still alive
+        try {
+            process.kill(pid, 0);
+            continue; // alive — don't touch
+        } catch {
+            // dead — clean up
+        }
+        const dir = join("/tmp", entry);
+        try {
+            rmSync(dir, { recursive: true, force: true });
+        } catch {
+            /* permission error or concurrent cleanup */
+        }
+        // Also kill any tmux session that belonged to this dead process.
+        // Sessions are named pi-bg-<slug>-<hash>, but we can't derive the name
+        // from the PID alone. Instead, kill sessions whose panes are all dead.
+    }
+    // Kill orphaned pi-bg sessions (all panes dead)
+    try {
+        const sessions = execSync("tmux list-sessions -F '#{session_name}'", {
+            encoding: "utf-8",
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "pipe"],
+        })
+            .trim()
+            .split("\n")
+            .filter((s) => s.startsWith("pi-bg-"));
+        for (const session of sessions) {
+            const panePids = execSync(
+                `tmux list-panes -t ${session} -F '#{pane_pid}'`,
+                {
+                    encoding: "utf-8",
+                    timeout: 3000,
+                    stdio: ["ignore", "pipe", "pipe"],
+                }
+            )
+                .trim()
+                .split("\n")
+                .map((p) => parseInt(p, 10));
+            const allDead = panePids.every((pid) => {
+                try {
+                    process.kill(pid, 0);
+                    return false;
+                } catch {
+                    return true;
+                }
+            });
+            if (allDead) {
+                execSync(`tmux kill-session -t ${session}`, {
+                    timeout: 3000,
+                    stdio: "ignore",
+                });
+            }
+        }
+    } catch {
+        /* tmux not available or no sessions */
     }
 }
 

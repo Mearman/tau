@@ -70,7 +70,10 @@ import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { isTmuxAvailable } from "./tmux.ts";
-import { cleanupTmuxRunDir } from "./features/bash-tmux.ts";
+import {
+    cleanupTmuxRunDir,
+    cleanupStaleTmuxRunDirs,
+} from "./features/bash-tmux.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -275,6 +278,11 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 "⚠️ tmux not found — using direct process management",
                 "warning"
             );
+        }
+
+        // Clean up run directories and tmux sessions from dead pi processes
+        if (state.tmuxAvailable) {
+            cleanupStaleTmuxRunDirs();
         }
 
         // Restore background-tasks state

@@ -706,7 +706,9 @@ function mockProc(
     const ee = new EventEmitter() as ChildProcess & {
         emitClose(code: number): void;
     };
-    ee.pid = pid;
+    // ChildProcess.pid is readonly but we need to set it for testing.
+    // Use defineProperty to bypass the type system.
+    Object.defineProperty(ee, "pid", { value: pid, writable: false });
     ee.emitClose = (code: number) => {
         ee.emit("close", code);
     };
@@ -923,7 +925,7 @@ void describe("registerBackgroundJob — proc close cleanup", () => {
 
         assert.equal(state.completedJobCount, 0);
 
-        const job = _rbg(
+        _rbg(
             proc,
             "/tmp/test-bg-counter.log",
             "echo count",
@@ -1029,7 +1031,12 @@ void describe("jobs attach — dead process detection", () => {
             ),
             new Promise<never>((_, reject) =>
                 setTimeout(
-                    () => reject(new Error("attach hung for 2s — donePromise never resolved")),
+                    () =>
+                        reject(
+                            new Error(
+                                "attach hung for 2s — donePromise never resolved"
+                            )
+                        ),
                     2_000
                 )
             ),
@@ -1083,7 +1090,12 @@ void describe("jobs attach — abort signal", () => {
             ),
             new Promise<never>((_, reject) =>
                 setTimeout(
-                    () => reject(new Error("attach did not respond to abort within 2s")),
+                    () =>
+                        reject(
+                            new Error(
+                                "attach did not respond to abort within 2s"
+                            )
+                        ),
                     2_000
                 )
             ),
