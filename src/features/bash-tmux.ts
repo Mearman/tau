@@ -135,7 +135,7 @@ export function readTmuxOutput(
  */
 export function spawnForegroundTmux(
     command: string,
-    cwd: string,
+    cwd: string
 ): {
     tmuxCtx: TmuxJobContext;
     logPath: string;
