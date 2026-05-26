@@ -344,7 +344,10 @@ export function startTimeoutTimer(
     const timeoutMs = explicitTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const timer = setTimeout(() => {
-        if (state.currentlyRunningToolCallId !== toolCallId) return;
+        // Guard: only act if this tool call still has a running process.
+        // The global currentlyRunningToolCallId may have been overwritten by
+        // a concurrent tool call — that doesn't mean *this* call finished.
+        if (!state.runningProcesses.has(toolCallId)) return;
 
         // If auto-backgrounding is disallowed for this command, kill it
         if (!isAutoBackgroundAllowed(command)) {
@@ -532,6 +535,7 @@ export function registerBackgroundJobs(
 
                 // Command completed quickly — return result
                 if (initialResult !== null) {
+                    state.backgroundJobs.delete(jobId);
                     const output = await readFile(logPath, "utf-8").catch(
                         () => ""
                     );
