@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
     createBashTool,
@@ -38,6 +38,18 @@ import {
     readOutputTailSync,
     formatJobLine,
 } from "../utils.ts";
+import { isTmuxAvailable } from "../tmux.ts";
+import {
+    attachTmuxContext,
+    getTmuxContext,
+    killTmuxJob,
+    pollTmuxCompletion,
+    readTmuxOutput,
+    spawnBackgroundTmux,
+    spawnForegroundTmux,
+    cleanupTmuxRunDir,
+    notifyTmuxCompletion,
+} from "./bash-tmux.ts";
 
 // ─── Kill helpers ───────────────────────────────────────────────────
 
@@ -406,7 +418,15 @@ export function registerBackgroundJobs(
                 );
             }
 
-            // Prepare log file — output goes here from the start
+            // ── Tmux path ─────────────────────────────────────────────
+            if (state.tmuxAvailable) {
+                return executeTmuxForeground(
+                    toolCallId, command, params, signal, onUpdate, ctx,
+                    state, pi,
+                );
+            }
+
+            // ── Direct spawn path (fallback when tmux unavailable) ───
             const jobId = generateJobId(++state.jobCounter);
             const logPath = logPathForJob(jobId);
             mkdirSync(dirname(logPath), { recursive: true });
@@ -695,9 +715,42 @@ export function registerBackgroundJobs(
             _onUpdate,
             ctx
         ): Promise<AgentToolResult<undefined>> {
+            const shouldNotify = params.notify !== false;
+
+            // ── Tmux path ─────────────────────────────────────────────
+            if (state.tmuxAvailable) {
+                const job = spawnBackgroundTmux(
+                    params.command,
+                    ctx.cwd,
+                    toolCallId,
+                    state,
+                    pi,
+                    ctx,
+                    (jobId, command, logPath) =>
+                        startStallWatchdog(jobId, command, logPath, pi, () => {
+                            killTmuxJob(
+                                state.backgroundJobs.get(jobId) ??
+                                    ({ id: jobId, command, pid: -1, startTime: Date.now(), status: "running", logPath, toolCallId, isBackgrounded: true } satisfies BackgroundJob)
+                            );
+                        }),
+                );
+
+                updateWidget(state, ctx);
+
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `Started background job ${job.id}\nCommand: ${params.command}\nOutput: ${job.logPath}`,
+                        },
+                    ],
+                    details: undefined,
+                };
+            }
+
+            // ── Direct spawn path (fallback) ──────────────────────────
             const jobId = generateJobId(++state.jobCounter);
             const logPath = logPathForJob(jobId);
-            const shouldNotify = params.notify !== false;
 
             const logFd = openSync(logPath, "w");
             const proc = spawn("bash", ["-c", params.command], {
@@ -836,10 +889,9 @@ export function registerBackgroundJobs(
                         throw new Error("jobId is required for action=output");
                     const job = lookupJob(state, params.jobId);
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
-                    const output = await readOutputTail(
-                        job.logPath,
-                        MAX_OUTPUT_PREVIEW_CHARS
-                    );
+                    const output = getTmuxContext(job)
+                        ? await readTmuxOutput(job, MAX_OUTPUT_PREVIEW_CHARS)
+                        : await readOutputTail(job.logPath, MAX_OUTPUT_PREVIEW_CHARS);
                     return {
                         content: [
                             {
@@ -856,17 +908,25 @@ export function registerBackgroundJobs(
                         throw new Error("jobId is required for action=kill");
                     const job = lookupJob(state, params.jobId);
                     if (!job) throw new Error(`Job not found: ${params.jobId}`);
-                    if (job.status !== "running" || !job.proc) {
+
+                    // Tmux jobs don't have proc — kill via tmux window.
+                    const tmuxCtx = getTmuxContext(job);
+                    if (tmuxCtx) {
+                        killTmuxJob(job);
+                    } else if (job.proc && job.status === "running") {
+                        killProcessGroup(job.proc.pid!, "SIGTERM");
+                    } else {
                         throw new Error(`Job is not running: ${job.id}`);
                     }
-                    killProcessGroup(job.proc.pid!, "SIGTERM");
                     silenceJobAfterKill(job);
                     clearPendingDecision(state, job);
                     return {
                         content: [
                             {
                                 type: "text" as const,
-                                text: `Sent SIGTERM to ${job.id} (process group)`,
+                                text: tmuxCtx
+                                    ? `Killed tmux window ${tmuxCtx.windowId} for ${job.id}`
+                                    : `Sent SIGTERM to ${job.id} (process group)`,
                             },
                         ],
                         details: undefined,
@@ -891,13 +951,15 @@ export function registerBackgroundJobs(
                     ) {
                         if (!job.donePromise) createJobDonePromise(job);
 
-                        // If the OS process is already dead but markJobTerminal
-                        // was never called (e.g. pre-fix zombie jobs), resolve
-                        // the donePromise now so attach doesn't hang forever.
-                        try {
-                            process.kill(job.pid, 0);
-                        } catch {
-                            markJobTerminal(job, "failed");
+                        // For direct-spawn jobs, check if OS process is already dead.
+                        // Tmux jobs (pid === -1) skip this check — completion is
+                        // detected via the exit-code sentinel file.
+                        if (job.pid > 0) {
+                            try {
+                                process.kill(job.pid, 0);
+                            } catch {
+                                markJobTerminal(job, "failed");
+                            }
                         }
 
                         onUpdate?.({
@@ -923,10 +985,12 @@ export function registerBackgroundJobs(
                         }
                     }
 
-                    const output = await readOutputTail(
-                        job.logPath,
-                        MAX_OUTPUT_PREVIEW_CHARS
-                    );
+                    const output = getTmuxContext(job)
+                        ? await readTmuxOutput(job, MAX_OUTPUT_PREVIEW_CHARS)
+                        : await readOutputTail(
+                              job.logPath,
+                              MAX_OUTPUT_PREVIEW_CHARS
+                          );
                     job.outputConsumed = true;
                     return {
                         content: [
@@ -988,7 +1052,11 @@ export function registerBackgroundJobs(
 
             switch (params.decision) {
                 case "kill": {
-                    if (job.proc && job.status === "running") {
+                    // Tmux jobs don't have proc — kill via tmux window.
+                    const tmuxCtx = getTmuxContext(job);
+                    if (tmuxCtx) {
+                        killTmuxJob(job);
+                    } else if (job.proc && job.status === "running") {
                         killProcessGroup(job.proc.pid!, "SIGTERM");
                     }
                     silenceJobAfterKill(job);
@@ -1011,10 +1079,12 @@ export function registerBackgroundJobs(
                     };
                 }
                 case "check": {
-                    const output = await readOutputTail(
-                        job.logPath,
-                        MAX_OUTPUT_PREVIEW_CHARS
-                    );
+                    const output = getTmuxContext(job)
+                        ? await readTmuxOutput(job, MAX_OUTPUT_PREVIEW_CHARS)
+                        : await readOutputTail(
+                              job.logPath,
+                              MAX_OUTPUT_PREVIEW_CHARS
+                          );
                     return {
                         content: [
                             {
@@ -1029,6 +1099,267 @@ export function registerBackgroundJobs(
         },
     });
 }
-// test
-// test
-// test
+
+// ─── Tmux foreground execution ──────────────────────────────────────
+
+/**
+ * Execute a bash command in the foreground using tmux.
+ *
+ * Spawns the command inside a tmux window and polls the exit-code
+ * sentinel file for completion. On timeout, the tmux window stays
+ * alive — no foreground→background race window.
+ */
+async function executeTmuxForeground(
+    toolCallId: string,
+    command: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<BashToolDetails | undefined> | undefined,
+    ctx: { cwd: string } & UiContext,
+    state: TauState,
+    pi: ExtensionAPI,
+): Promise<AgentToolResult<BashToolDetails | undefined>> {
+    const jobId = `tmux-${process.pid}-${++state.jobCounter}`;
+    let logPath: string;
+    let tmuxCtx: import("./bash-tmux.ts").TmuxJobContext;
+
+    try {
+        const result = spawnForegroundTmux(command, ctx.cwd, state);
+        logPath = result.logPath;
+        tmuxCtx = result.tmuxCtx;
+    } catch {
+        // Not in a git repo — fall back to direct spawn.
+        state.jobCounter--;
+        throw new Error(
+            "tmux backend requires a git repository. " +
+            "Falling back to direct process management."
+        );
+    }
+
+    // Register as foreground job
+    const job: BackgroundJob = {
+        id: jobId,
+        command,
+        pid: -1, // tmux — no single PID
+        startTime: Date.now(),
+        status: "running",
+        logPath,
+        toolCallId,
+        isBackgrounded: false,
+    };
+    createJobDonePromise(job);
+    attachTmuxContext(job, tmuxCtx);
+    state.backgroundJobs.set(jobId, job);
+
+    // Ctrl+B background signal
+    let backgroundResolve: (() => void) | null = null;
+    const backgroundSignal = new Promise<void>((resolve) => {
+        backgroundResolve = resolve;
+    });
+
+    function triggerBackground(): void {
+        backgroundResolve?.();
+    }
+
+    // Register so Ctrl+B can find this job
+    // Tmux jobs don't have a ChildProcess, so we store a minimal RunningProcess
+    // that can trigger backgrounding.
+    state.runningProcesses.set(toolCallId, {
+        toolCallId,
+        proc: { pid: -1 } as never, // sentinel — not a real process
+        command,
+        logPath,
+        triggerBackground,
+    });
+    state.currentlyRunningToolCallId = toolCallId;
+
+    // Abort handler — kill tmux window
+    if (signal) {
+        signal.addEventListener("abort", () => {
+            killTmuxJob(job);
+        });
+    }
+
+    // Timeout timer
+    const timeoutMs =
+        typeof params.timeout === "number" ? params.timeout * 1_000 : DEFAULT_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+        if (!state.runningProcesses.has(toolCallId)) return;
+        if (!isAutoBackgroundAllowed(command)) {
+            killTmuxJob(job);
+            return;
+        }
+        triggerBackground();
+    }, timeoutMs);
+    timer.unref();
+
+    // Background hint
+    const hintTimer = setTimeout(() => {
+        ctx.ui.notify("⏱ Ctrl+B to background", "info");
+    }, 2_000);
+    hintTimer.unref();
+
+    // Progress polling
+    const PROGRESS_POLL_MS = 1_000;
+    let pollTimer: NodeJS.Timeout | undefined;
+    const startPolling = (): void => {
+        pollTimer = setInterval(() => {
+            try {
+                const content = readOutputTailSync(logPath, 4_096);
+                if (content && content !== "(no output yet)") {
+                    onUpdate?.({
+                        content: [{ type: "text" as const, text: content }],
+                        details: undefined,
+                    });
+                }
+            } catch {
+                // File may not be readable yet
+            }
+        }, PROGRESS_POLL_MS);
+        pollTimer.unref();
+    };
+
+    // Completion polling — check the exit-code sentinel
+    const completionPromise = new Promise<number | null>((resolve) => {
+        const check = setInterval(() => {
+            const code = checkExitCode(tmuxCtx.exitCodeFile);
+            if (code !== undefined) {
+                clearInterval(check);
+                resolve(code);
+            }
+        }, 200);
+        check.unref();
+    });
+
+    try {
+        // Wait for initial output or quick completion (2s threshold)
+        const initialResult = await Promise.race([
+            completionPromise,
+            new Promise<null>((resolve) => {
+                const t = setTimeout(resolve, 2_000) as unknown as NodeJS.Timeout;
+                t.unref();
+            }),
+        ]);
+
+        // Command completed quickly
+        if (initialResult !== null) {
+            state.backgroundJobs.delete(jobId);
+            const output = await readFile(logPath, "utf-8").catch(() => "");
+            // Clean up tmux window
+            killWindow(tmuxCtx.windowId);
+            if (initialResult !== 0 && initialResult !== null) {
+                throw new Error(output || `Command exited with code ${initialResult}`);
+            }
+            return {
+                content: [{ type: "text" as const, text: output || "(no output)" }],
+                details: undefined,
+            };
+        }
+
+        // Command still running — start polling for progress
+        startPolling();
+
+        // Race: completion vs background signal
+        const raceResult = await Promise.race([
+            completionPromise.then((code) => ({ type: "completed" as const, code })),
+            backgroundSignal.then(() => ({ type: "backgrounded" as const, code: undefined as number | undefined })),
+        ]);
+
+        if (raceResult.type === "backgrounded") {
+            clearInterval(pollTimer);
+            clearTimeout(timer);
+            clearTimeout(hintTimer);
+            state.runningProcesses.delete(toolCallId);
+
+            // Mark as backgrounded — the completion poller in bash-tmux will handle notification.
+            // Start the background completion poller.
+            job.isBackgrounded = true;
+            state.currentlyRunningToolCallId = null;
+
+            // Start stall watchdog
+            startStallWatchdog(jobId, command, logPath, pi, () => {
+                killTmuxJob(job);
+            });
+
+            // Start background completion poller
+            const bgPoller = setInterval(() => {
+                const result = pollTmuxCompletion(job);
+                if (!result.completed) return;
+                clearInterval(bgPoller);
+                markJobTerminal(
+                    job,
+                    result.exitCode === 0 || result.exitCode === null ? "completed" : "failed",
+                    result.exitCode ?? 0,
+                );
+                notifyTmuxCompletion(job, state, pi, ctx);
+                updateWidget(state, ctx);
+            }, 500);
+            bgPoller.unref();
+
+            state.pendingDecisionJobId = jobId;
+
+            const duration = formatDuration(timeoutMs);
+            pi.sendMessage(
+                {
+                    customType: "bg-timeout",
+                    content:
+                        `⏰ Command timed out after ${duration} and has been backgrounded as ${jobId}.\n` +
+                        `Command: ${command}\n` +
+                        `Tmux window: ${tmuxCtx.windowId}\n` +
+                        `Output so far: ${logPath}\n\n` +
+                        `Use the job_decide tool with jobId "${jobId}" to decide:\n` +
+                        `- decision "check": inspect the output first\n` +
+                        `- decision "keep": let it continue running\n` +
+                        `- decision "kill": terminate it\n\n` +
+                        `You can attach to the tmux window with: tmux attach -t ${tmuxCtx.windowId}`,
+                    display: true,
+                    details: { jobId, logPath, command },
+                },
+                { deliverAs: "followUp", triggerTurn: true }
+            );
+
+            updateWidget(state, ctx);
+
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Process backgrounded as ${jobId}\nCommand: ${command}\nTmux window: ${tmuxCtx.windowId}\nOutput: ${logPath}`,
+                    },
+                ],
+                details: undefined,
+            };
+        }
+
+        // Command completed normally
+        clearInterval(pollTimer);
+        clearTimeout(timer);
+        clearTimeout(hintTimer);
+        state.runningProcesses.delete(toolCallId);
+        if (state.currentlyRunningToolCallId === toolCallId) {
+            state.currentlyRunningToolCallId = null;
+        }
+        state.backgroundJobs.delete(jobId);
+
+        const output = await readFile(logPath, "utf-8").catch(() => "");
+        killWindow(tmuxCtx.windowId);
+
+        if (raceResult.code !== 0 && raceResult.code !== null) {
+            throw new Error(output || `Command exited with code ${raceResult.code}`);
+        }
+
+        return {
+            content: [{ type: "text" as const, text: output || "(no output)" }],
+            details: undefined,
+        };
+    } finally {
+        clearInterval(pollTimer);
+        clearTimeout(timer);
+        clearTimeout(hintTimer);
+    }
+}
+
+// ─── Helpers used by executeTmuxForeground ──────────────────────────
+
+import { checkExitCode, killWindow } from "../tmux.ts";
+

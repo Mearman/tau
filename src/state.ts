@@ -20,6 +20,11 @@ export class TauState {
     agentBackgrounded = false;
     pendingDecisionJobId: string | undefined;
 
+    /** Whether tmux is available for the tmux-backed bash backend. */
+    tmuxAvailable = false;
+    /** Whether the tmux-unavailable warning has been shown this session. */
+    tmuxWarningShown = false;
+
     /** Lifetime counters for terminal jobs (for status bar summary). */
     completedJobCount = 0;
     failedJobCount = 0;

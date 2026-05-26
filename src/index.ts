@@ -69,6 +69,8 @@ import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
+import { isTmuxAvailable } from "./tmux.ts";
+import { cleanupTmuxRunDir } from "./features/bash-tmux.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -264,6 +266,16 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
     pi.on("session_start", async (_event, ctx) => {
         ctx.ui.setStatus("tau-turn", ctx.ui.theme.fg("dim", "Ready"));
+
+        // ── Tmux detection ───────────────────────────────────────────
+        state.tmuxAvailable = isTmuxAvailable();
+        if (!state.tmuxAvailable && !state.tmuxWarningShown) {
+            state.tmuxWarningShown = true;
+            ctx.ui.notify(
+                "⚠️ tmux not found — using direct process management",
+                "warning"
+            );
+        }
 
         // Restore background-tasks state
         const entries = ctx.sessionManager.getEntries();
@@ -524,6 +536,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
         stopTitlebarSpinner(pi, state, ctx);
         stopAgentTimer(state);
         state.agentStartTime = undefined;
+
+        cleanupTmuxRunDir();
 
         pi.appendEntry("background-tasks-state", {
             jobs: Array.from(state.backgroundJobs.entries()).map(

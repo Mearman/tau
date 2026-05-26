@@ -20,6 +20,7 @@ import {
     killProcessGroup,
     readOutputTail,
 } from "../utils.ts";
+import { getTmuxContext, killTmuxJob } from "./bash-tmux.ts";
 
 // ── Background shortcut handler (Ctrl+B) — signal-based ────────────
 
@@ -126,7 +127,12 @@ async function showTaskDetail(
                     `Duration: ${duration} · Log: ${job.logPath}\n\n--- OUTPUT ---\n${output}`
             );
         } else if (action === actions[2]) {
-            if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
+            const tmuxCtx = getTmuxContext(job);
+            if (tmuxCtx) {
+                killTmuxJob(job);
+            } else if (job.proc) {
+                killProcessGroup(job.proc.pid!, "SIGTERM");
+            }
             silenceJobAfterKill(job);
             ctx.ui.notify(`Killed ${job.id}`, "info");
             updateWidget(state, ctx);
@@ -249,7 +255,12 @@ export function registerBackgroundCommands(
             }
 
             const job = runningJobs[0];
-            if (job.proc) killProcessGroup(job.proc.pid!, "SIGTERM");
+            const tmuxCtx = getTmuxContext(job);
+            if (tmuxCtx) {
+                killTmuxJob(job);
+            } else if (job.proc) {
+                killProcessGroup(job.proc.pid!, "SIGTERM");
+            }
             silenceJobAfterKill(job);
             ctx.ui.notify(`Killed ${job.id}`, "info");
             updateWidget(state, ctx);
