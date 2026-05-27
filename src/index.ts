@@ -5,7 +5,7 @@
  *
  * Tools: bash (overridden), bash_bg, jobs, job_decide, task
  * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /bookmark, /unbookmark,
- *           /context, /footer, /handoff, /handover, /notifications, /preset,
+ *           /context, /footer, /notifications, /preset,
  *           /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle)
@@ -60,7 +60,7 @@ import { registerClaudeRules } from "./features/claude-rules.ts";
 import { registerCustomFooter } from "./features/custom-footer.ts";
 import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
-import { registerHandoff } from "./features/handoff.ts";
+// Handoff disabled — import { registerHandoff } from "./features/handoff.ts";
 import { registerPreset } from "./features/preset.ts";
 import { registerLoop } from "./features/loop.ts";
 import { registerSessionName } from "./features/session-name.ts";
@@ -94,7 +94,7 @@ export default function (pi: ExtensionAPI) {
     registerCustomFooter(pi);
     registerGitCheckpoint(pi);
     registerGithubAutocomplete(pi);
-    registerHandoff(pi, state);
+    // registerHandoff(pi, state); // disabled
     registerPreset(pi);
     registerLoop(pi);
     registerSessionName(pi);
@@ -150,17 +150,17 @@ export default function (pi: ExtensionAPI) {
         return {};
     });
 
-    pi.on("tool_result", async (event) => {
-        // Track file paths accessed by read/edit/write for handoff directory detection.
-        if (
-            (event.toolName === "read" ||
-                event.toolName === "edit" ||
-                event.toolName === "write") &&
-            typeof event.input.path === "string"
-        ) {
-            state.accessedFilePaths.push(event.input.path);
-        }
-    });
+    // Handoff disabled — file path tracking removed
+    // pi.on("tool_result", async (event) => {
+    //     if (
+    //         (event.toolName === "read" ||
+    //             event.toolName === "edit" ||
+    //             event.toolName === "write") &&
+    //         typeof event.input.path === "string"
+    //     ) {
+    //         state.accessedFilePaths.push(event.input.path);
+    //     }
+    // });
 
     pi.on("turn_start", async (_event, ctx) => {
         if (state.agentStartTime !== undefined && !state.agentTimer)
