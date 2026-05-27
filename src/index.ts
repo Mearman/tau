@@ -73,7 +73,9 @@ import { isTmuxAvailable } from "./tmux.ts";
 import {
     cleanupTmuxRunDir,
     cleanupStaleTmuxRunDirs,
+    attachTmuxContext,
 } from "./features/bash-tmux.ts";
+import { checkExitCode } from "./tmux.ts";
 
 export default function (pi: ExtensionAPI) {
     const state = new TauState();
@@ -305,10 +307,39 @@ After completing a step, include a [DONE:n] tag in your response.`,
                 if (data.jobs) {
                     for (const [id, jobData] of data.jobs) {
                         if (jobData.status === "running") {
-                            try {
-                                process.kill(jobData.pid, 0);
-                            } catch {
-                                jobData.status = "completed";
+                            // Tmux jobs store context in an ad-hoc `tmux` property
+                            // that survives serialisation.
+                            const tmux: unknown = (
+                                jobData as unknown as Record<string, unknown>
+                            ).tmux;
+                            if (
+                                typeof tmux === "object" &&
+                                tmux !== null &&
+                                "exitCodeFile" in tmux
+                            ) {
+                                // Tmux job — check sentinel file instead of pid
+                                const exitCodeFile = (
+                                    tmux as { exitCodeFile: string }
+                                ).exitCodeFile;
+                                const code = checkExitCode(exitCodeFile);
+                                if (code !== undefined) {
+                                    jobData.status = "completed";
+                                    jobData.exitCode = code;
+                                }
+                                // else: still running — reattach the context
+                                attachTmuxContext(
+                                    jobData as import("./types.js").BackgroundJob,
+                                    tmux as import(
+                                        "./features/bash-tmux.js"
+                                    ).TmuxJobContext
+                                );
+                            } else {
+                                // Direct-spawn job — check if pid is alive
+                                try {
+                                    process.kill(jobData.pid, 0);
+                                } catch {
+                                    jobData.status = "completed";
+                                }
                             }
                         }
                         state.backgroundJobs.set(id, jobData);
