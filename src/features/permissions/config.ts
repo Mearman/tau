@@ -10,9 +10,8 @@
  *   3. .claude/settings.local.json     — local settings (gitignored, personal)
  */
 
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, resolve, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import type {
     PermissionMode,
@@ -20,6 +19,7 @@ import type {
     PermissionRule,
     RuleSource,
     SettingsFile,
+    PermissionUpdateDestination,
 } from "./types.js";
 
 // ─── Settings file paths ────────────────────────────────────────────
@@ -90,11 +90,11 @@ function parseSettingsFile(raw: string): PermissionSettings | null {
     };
 }
 
-async function loadFile(path: string): Promise<PermissionSettings | null> {
+function loadFile(path: string): PermissionSettings | null {
     try {
         const resolved = resolve(path);
         if (!existsSync(resolved)) return null;
-        const raw = await readFile(resolved, "utf8");
+        const raw = readFileSync(resolved, "utf8");
         return parseSettingsFile(raw);
     } catch {
         return null;
@@ -126,7 +126,7 @@ export async function loadAllPermissions(
     ];
 
     for (const { path, source } of sources) {
-        const settings = await loadFile(path);
+        const settings = loadFile(path);
         if (settings === null) continue;
 
         for (const rule of settings.allow ?? []) {
@@ -204,4 +204,95 @@ export function normaliseToolInput(toolName: string, rawInput: string): string {
     // Strip leading ./ and use basename for file tools
     const stripped = rawInput.replace(/^\.\/+/, "");
     return basename(stripped);
+}
+
+// ─── Settings file writing ──────────────────────────────────────────
+
+/**
+ * Resolve the file path for a permission update destination.
+ */
+export function resolveDestinationPath(
+    destination: PermissionUpdateDestination,
+    cwd: string
+): string {
+    switch (destination) {
+        case "userSettings":
+            return userSettingsPath();
+        case "projectSettings":
+            return projectSettingsPath(cwd);
+        case "localSettings":
+            return localSettingsPath(cwd);
+        case "session":
+            // Session rules are in-memory only — no file path
+            return "";
+    }
+}
+
+/**
+ * Write an allow rule to the appropriate settings file.
+ *
+ * Reads the existing file (or creates a new one), adds the rule to
+ * permissions.allow, and writes back. Session rules are not persisted
+ * to disk — they are stored in memory via the session rules array.
+ *
+ * @returns true if the rule was written successfully
+ */
+export function writeRuleToSettings(
+    rule: string,
+    destination: PermissionUpdateDestination,
+    cwd: string
+): boolean {
+    if (destination === "session") {
+        // Session rules are added in-memory; caller handles this
+        return true;
+    }
+
+    const filePath = resolveDestinationPath(destination, cwd);
+    const dir = dirname(filePath);
+
+    let existing: Record<string, unknown> = {};
+    if (existsSync(filePath)) {
+        try {
+            const raw = readFileSync(filePath, "utf8");
+            existing = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+            // Corrupted file — start fresh
+        }
+    }
+
+    // Ensure the permissions object exists
+    const perms = (
+        typeof existing.permissions === "object" &&
+        existing.permissions !== null
+            ? existing.permissions
+            : {}
+    ) as Record<string, unknown>;
+
+    // Add the rule to the allow array (deduplicated)
+    const allow: string[] = Array.isArray(perms.allow)
+        ? (perms.allow as string[]).slice()
+        : [];
+    if (!allow.includes(rule)) {
+        allow.push(rule);
+    }
+    perms.allow = allow;
+    existing.permissions = perms;
+
+    // Ensure directory exists
+    try {
+        mkdirSync(dir, { recursive: true });
+    } catch {
+        // May already exist
+    }
+
+    try {
+        writeFileSync(
+            filePath,
+            JSON.stringify(existing, null, 2) + "\n",
+            "utf8"
+        );
+        return true;
+    } catch {
+        return false;
+    }
 }
