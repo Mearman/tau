@@ -476,7 +476,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
         state.permissionLastLoadedAt = permState.lastLoadedAt;
 
         // ── Mode indicator in status bar ───────────────────────────
-        if (state.permissionMode !== "ask" && ctx.hasUI) {
+        if (state.permissionMode !== "allow" && ctx.hasUI) {
             const colour = modeColour(state.permissionMode);
             ctx.ui.setStatus(
                 "tau-perm-mode",
