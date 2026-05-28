@@ -38,6 +38,7 @@ import {
     isDangerousFilePath,
 } from "./filesystem.js";
 import { promptPermission } from "./prompt.js";
+import { isPlanFilePath } from "../plan-file.js";
 import { basename, resolve } from "node:path";
 
 // ─── Permission state ────────────────────────────────────────────────
@@ -49,6 +50,8 @@ export interface PermissionState {
     disableBypass: boolean;
     lastLoadedAt: number;
     sessionRules: string[];
+    /** Active plan file slug, if in plan mode. Used to allow writes to plan file. */
+    planSlug?: string;
 }
 
 // Re-check settings every 60 seconds
@@ -200,8 +203,14 @@ export async function checkToolPermission(
     // ── 2. Mode-specific restrictions ─────────────────────────────
 
     // Plan mode: restrict tool set and bash commands
+    // Exception: writes to the plan file are allowed
     if (state.mode === "plan") {
         if (toolName === "Edit" || toolName === "Write") {
+            const path = String(getPath(event.input));
+            if (state.planSlug && isPlanFilePath(path, cwd, state.planSlug)) {
+                // Allow writes to the plan file
+                return { block: false };
+            }
             return {
                 block: true,
                 reason: "Plan mode: write operations are disabled. Use read-only tools.",
@@ -449,6 +458,7 @@ export async function reloadSettingsIfNeeded(
         disableBypass: loaded.disableBypassPermissions,
         lastLoadedAt: now,
         sessionRules: state.sessionRules, // preserved across reloads
+        planSlug: state.planSlug, // preserved across reloads
     };
 }
 

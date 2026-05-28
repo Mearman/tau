@@ -3,13 +3,14 @@
  *
  * Background tasks, notifications, plan mode, presets, and other enhancements.
  *
- * Tools: bash (overridden), bash_bg, jobs, job_decide, task
+ * Tools: bash (overridden), bash_bg, jobs, job_decide, task,
+ *        enter_plan_mode, exit_plan_mode
  * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /perm, /bookmark,
  *           /unbookmark, /context, /footer, /notifications, /preset,
  *           /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle),
- *            Ctrl+Shift+P (permission mode cycle)
+ *            Ctrl+Shift+M (permission mode cycle), Ctrl+Shift+T (thinking level)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -51,7 +52,11 @@ import { registerBackgroundJobs } from "./features/background.ts";
 import { registerBackgroundCommands } from "./features/background-commands.ts";
 import { registerAgentBackground } from "./features/agent-background.ts";
 import { registerPlanMode } from "./features/plan-mode.ts";
-import { registerTask, reconstructTaskState } from "./features/task.ts";
+import {
+    registerTask,
+    reconstructTaskState,
+    formatTaskTree,
+} from "./features/task.ts";
 import {
     registerToolsSelector,
     restoreToolsFromBranch,
@@ -78,6 +83,7 @@ import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
+import { registerPlanTools } from "./features/plan-tools.js";
 import { isTmuxAvailable } from "./tmux.ts";
 import {
     cleanupTmuxRunDir,
@@ -113,6 +119,7 @@ export default function (pi: ExtensionAPI) {
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
+    registerPlanTools(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
@@ -157,6 +164,7 @@ export default function (pi: ExtensionAPI) {
                 disableBypass: state.permissionDisableBypass,
                 lastLoadedAt: state.permissionLastLoadedAt,
                 sessionRules: state.permissionSessionRules,
+                planSlug: state.planSlug,
             },
             ctx.cwd
         );
@@ -247,33 +255,44 @@ export default function (pi: ExtensionAPI) {
 
     // Plan-mode: inject context before agent starts
     pi.on("before_agent_start", async () => {
-        if (state.planModeEnabled) {
+        if (state.planModeEnabled && state.planSlug) {
+            const planPath = state.planSlug
+                ? `.pi/plans/${state.planSlug}.md`
+                : "(no plan file)";
+            const taskTree =
+                state.tasks.length > 0
+                    ? `\n\nCurrent task tree:\n${formatTaskTree(state.tasks)}`
+                    : "";
             return {
                 message: {
                     customType: "plan-mode-context",
                     content: `[PLAN MODE ACTIVE]
-You are in plan mode - a read-only exploration mode for safe code analysis.
+You are in plan mode — a read-only exploration mode for structured planning.
 
 Restrictions:
-- You can only use: read, bash, grep, find, ls, questionnaire
-- You CANNOT use: edit, write (file modifications are disabled)
+- Only read-only tools are available (read, bash, grep, find, ls)
 - Bash is restricted to an allowlist of read-only commands
+- The ONLY writable file is the plan file at: ${planPath}
+- The task tool is fully available — use it to structure the implementation
 
-Ask clarifying questions using the questionnaire tool.
+Your job is to:
+1. Explore the codebase using read-only tools
+2. Build a structured task tree using the task tool:
+   - Create a root task for the overall goal
+   - Decompose into subtasks with child-of links
+   - Add blocks/depends-on links for ordering constraints
+   - Tasks without dependency links between them are parallel candidates
+3. Write the narrative plan to ${planPath}
+4. Call exit_plan_mode when the plan is ready for user approval
 
-Create a detailed numbered plan under a "Plan:" header:
-
-Plan:
-1. First step description
-2. Second step description
-...
-
-Do NOT attempt to make changes - just describe what you would do.`,
+The plan file should include: Context, Approach, Files to modify,
+Existing code to reuse (with paths), and Verification steps.${taskTree}`,
                     display: false,
                 },
             };
         }
 
+        // Legacy execution mode (deprecated, kept for backward compat)
         if (state.planExecutionMode && state.planItems.length > 0) {
             const remaining = state.planItems.filter((t) => !t.completed);
             const todoList = remaining
