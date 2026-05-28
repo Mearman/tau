@@ -23,6 +23,8 @@ import {
     MODE_SHORT_TITLES,
 } from "./modes.js";
 import { isBypassAvailable } from "./modes.js";
+import { writeRuleToSettings } from "./config.js";
+import type { PermissionUpdateDestination } from "./types.js";
 
 export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
     // ── /perm command ─────────────────────────────────────────────
@@ -61,6 +63,60 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
                 return;
             }
 
+            // /perm add <rule> [destination]
+            if (subcommand.startsWith("add ")) {
+                const parts = subcommand.slice(4).trim().split(/\s+/);
+                const rule = parts[0];
+                const destArg = (parts[1] ?? "session").toLowerCase();
+                const destMap: Record<string, PermissionUpdateDestination> = {
+                    session: "session",
+                    local: "localSettings",
+                    project: "projectSettings",
+                    user: "userSettings",
+                    always: "userSettings",
+                };
+                const dest = destMap[destArg];
+
+                if (!rule) {
+                    ctx.ui.notify(
+                        "Usage: /perm add <rule> [session|local|project|always]",
+                        "warning"
+                    );
+                    return;
+                }
+
+                if (!dest) {
+                    ctx.ui.notify(
+                        `Unknown destination "${destArg}". Use: session, local, project, always`,
+                        "warning"
+                    );
+                    return;
+                }
+
+                if (dest === "session") {
+                    if (!state.permissionSessionRules.includes(rule)) {
+                        state.permissionSessionRules.push(rule);
+                        state.permissionRules.push({
+                            rule,
+                            behavior: "allow",
+                            source: "session",
+                        });
+                    }
+                    ctx.ui.notify(`Added session rule: ${rule}`, "info");
+                } else {
+                    const ok = writeRuleToSettings(rule, dest, ctx.cwd);
+                    if (ok) {
+                        ctx.ui.notify(`Added ${destArg} rule: ${rule}`, "info");
+                    } else {
+                        ctx.ui.notify(
+                            `Failed to write rule to settings file`,
+                            "error"
+                        );
+                    }
+                }
+                return;
+            }
+
             // Try to set a specific mode
             const target = PERMISSION_MODES.find(
                 (m) =>
@@ -93,7 +149,7 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
                 .join("\n");
 
             ctx.ui.notify(
-                `Usage: /perm [status|cycle|<mode>]\n\nModes:\n${modeList}`,
+                `Usage: /perm [status|cycle|add|<mode>]\n\nModes:\n${modeList}\n\nAdd rule: /perm add <rule> [session|local|project|always]`,
                 "info"
             );
         },
