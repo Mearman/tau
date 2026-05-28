@@ -10,6 +10,7 @@ import {
     formatTaskTree,
     TaskListComponent,
     reconstructTaskState,
+    countIndependentBranches,
 } from "../features/task.ts";
 import { TauState } from "../state.ts";
 import type { Task } from "../types.ts";
@@ -509,5 +510,96 @@ void describe("reconstructTaskState", () => {
         reconstructTaskState(state, ctx);
         assert.equal(state.tasks.length, 0);
         assert.equal(state.nextTaskId, 1);
+    });
+});
+
+void describe("countIndependentBranches", () => {
+    void it("returns 0 for empty task list", () => {
+        assert.equal(countIndependentBranches([]), 0);
+    });
+
+    void it("returns 1 for single root task", () => {
+        const tasks: Task[] = [
+            { id: 1, title: "Root", status: "todo", links: [], createdAt: 0 },
+        ];
+        assert.equal(countIndependentBranches(tasks), 1);
+    });
+
+    void it("returns 2 for two independent roots", () => {
+        const tasks: Task[] = [
+            { id: 1, title: "A", status: "todo", links: [], createdAt: 0 },
+            { id: 2, title: "B", status: "todo", links: [], createdAt: 0 },
+        ];
+        assert.equal(countIndependentBranches(tasks), 2);
+    });
+
+    void it("returns 1 when two roots have a dependency link", () => {
+        const tasks: Task[] = [
+            {
+                id: 1,
+                title: "A",
+                status: "todo",
+                links: [{ targetId: 2, type: "blocks" }],
+                createdAt: 0,
+            },
+            { id: 2, title: "B", status: "todo", links: [], createdAt: 0 },
+        ];
+        // A blocks B — both are in a dependency chain, so no independent
+        // roots remain. The function returns 1 as a floor (tasks exist).
+        assert.equal(countIndependentBranches(tasks), 1);
+    });
+
+    void it("counts independent roots excluding those in dependency chains", () => {
+        const tasks: Task[] = [
+            // A and B are linked (A blocks B)
+            {
+                id: 1,
+                title: "A",
+                status: "todo",
+                links: [{ targetId: 2, type: "blocks" }],
+                createdAt: 0,
+            },
+            { id: 2, title: "B", status: "todo", links: [], createdAt: 0 },
+            // C is independent
+            { id: 3, title: "C", status: "todo", links: [], createdAt: 0 },
+        ];
+        // A and B have deps, C doesn't — 1 independent branch
+        assert.equal(countIndependentBranches(tasks), 1);
+    });
+
+    void it("ignores child-of links", () => {
+        const tasks: Task[] = [
+            {
+                id: 1,
+                title: "Root",
+                status: "todo",
+                links: [],
+                createdAt: 0,
+            },
+            {
+                id: 2,
+                title: "Child",
+                status: "todo",
+                links: [{ targetId: 1, type: "child-of" }],
+                createdAt: 0,
+            },
+        ];
+        // Only 1 root (task 2 is a child), so 1 branch
+        assert.equal(countIndependentBranches(tasks), 1);
+    });
+
+    void it("ignores related links (not a dependency)", () => {
+        const tasks: Task[] = [
+            {
+                id: 1,
+                title: "A",
+                status: "todo",
+                links: [{ targetId: 2, type: "related" }],
+                createdAt: 0,
+            },
+            { id: 2, title: "B", status: "todo", links: [], createdAt: 0 },
+        ];
+        // Related links don't create dependencies — both independent
+        assert.equal(countIndependentBranches(tasks), 2);
     });
 });

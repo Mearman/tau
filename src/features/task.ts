@@ -103,6 +103,44 @@ export function getDescendantIds(tasks: Task[], taskId: number): Set<number> {
 }
 
 /**
+ * Count the number of independent task branches in the tree.
+ *
+ * A branch is a root task (no child-of link). Two branches are
+ * "dependent" if any task in one has a blocks/depends-on link to a
+ * task in the other. Independent branches can be dispatched as
+ * parallel agents.
+ *
+ * Returns the number of roots that are NOT involved in any
+ * inter-root dependency chain. Returns at least 1 if tasks exist.
+ */
+export function countIndependentBranches(tasks: Task[]): number {
+    if (tasks.length === 0) return 0;
+
+    const roots = tasks.filter(
+        (t) => !t.links.some((l) => l.type === "child-of")
+    );
+
+    if (roots.length <= 1) return 1;
+
+    const rootIds = new Set(roots.map((r) => r.id));
+    const rootsWithDeps = new Set<number>();
+
+    for (const root of roots) {
+        for (const link of root.links) {
+            if (
+                (link.type === "blocks" || link.type === "depends-on") &&
+                rootIds.has(link.targetId)
+            ) {
+                rootsWithDeps.add(root.id);
+                rootsWithDeps.add(link.targetId);
+            }
+        }
+    }
+
+    return roots.filter((r) => !rootsWithDeps.has(r.id)).length || 1;
+}
+
+/**
  * Checks whether making `newParentId` the parent of `taskId` would
  * create a cycle (i.e. newParentId is taskId or a descendant of it).
  */
