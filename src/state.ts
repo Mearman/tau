@@ -9,6 +9,10 @@
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { BackgroundJob, RunningProcess, Task } from "./types.ts";
 import type { TodoItem } from "./plan-utils.ts";
+import type {
+    PermissionMode,
+    PermissionRule,
+} from "./features/permissions/types.js";
 
 export class TauState {
     // ── Background jobs ──────────────────────────────────────────────
@@ -86,4 +90,12 @@ export class TauState {
 
     /** @deprecated Handoff disabled — kept for type compatibility with disabled handoff.ts */
     accessedFilePaths: string[] = [];
+
+    // ── Permissions ─────────────────────────────────────────────────
+
+    permissionMode: PermissionMode = "ask";
+    permissionRules: PermissionRule[] = [];
+    permissionAdditionalDirectories = new Set<string>();
+    permissionDisableBypass = false;
+    permissionLastLoadedAt = 0;
 }
