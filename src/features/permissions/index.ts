@@ -20,7 +20,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { PermissionMode, PermissionRule } from "./types.js";
 import { toClaudeToolName } from "./types.js";
-import { loadAllPermissions, getToolInput, normaliseToolInput } from "./config.js";
+import {
+    loadAllPermissions,
+    getToolInput,
+    normaliseToolInput,
+} from "./config.js";
 import { findMatchingRule } from "./rules.js";
 import {
     checkBashPermissions,
@@ -131,9 +135,7 @@ export async function checkToolPermission(
     // ── 3. Safety checks (bypass-immune) ─────────────────────────
 
     if (toolName === "Edit" || toolName === "Write") {
-        const path = String(
-            getPath(event.input as Record<string, unknown>)
-        );
+        const path = String(getPath(event.input));
         if (isDangerousFilePath(path)) {
             // Safety checks are bypass-immune — always prompt even in bypassPermissions mode
             const decision = await promptPermission(
@@ -242,9 +244,7 @@ export async function checkToolPermission(
 
     // For file tools, check working directory scope
     if (toolName === "Read") {
-        const path = String(
-            getPath(event.input as Record<string, unknown>)
-        );
+        const path = String(getPath(event.input));
         const result = checkReadPermission(
             state.rules,
             path,
@@ -271,9 +271,7 @@ export async function checkToolPermission(
     }
 
     if (toolName === "Edit" || toolName === "Write") {
-        const path = String(
-            getPath(event.input as Record<string, unknown>)
-        );
+        const path = String(getPath(event.input));
         const result = checkWritePermission(
             state.rules,
             path,
