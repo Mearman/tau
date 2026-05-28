@@ -101,7 +101,7 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
 
     // ── Ctrl+Shift+P — cycle permission mode ──────────────────────
 
-    pi.registerShortcut(Key.ctrlShift("p"), {
+    pi.registerShortcut(Key.tab, {
         description: "Cycle permission mode",
         handler: async (ctx) => {
             cycleMode(pi, state, ctx);
