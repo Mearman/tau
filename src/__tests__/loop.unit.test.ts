@@ -134,13 +134,22 @@ void describe("loop extractCompletionPromise", () => {
 // ─── parseLoopArgs (integration of all parsers) ───────────────────────
 
 void describe("loop parseLoopArgs", () => {
-    void it("parses count mode", () => {
+    void it("parses count mode with prompt", () => {
         const result = parseLoopArgs("5 do something");
         assert.equal(result.mode.kind, "count");
         if (result.mode.kind === "count") {
             assert.equal(result.mode.count, 5);
         }
         assert.equal(result.prompt, "do something");
+    });
+
+    void it("parses bare number as count mode with empty prompt", () => {
+        const result = parseLoopArgs("5");
+        assert.equal(result.mode.kind, "count");
+        if (result.mode.kind === "count") {
+            assert.equal(result.mode.count, 5);
+        }
+        assert.equal(result.prompt, "");
     });
 
     void it("parses interval mode with duration", () => {

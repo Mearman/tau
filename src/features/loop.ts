@@ -4,6 +4,7 @@
  * Parses the first token to determine loop mode:
  *
  *   /loop 5 do something         — run 5 times, then stop
+ *   /loop 5                      — run 5 times (prompt inferred from context)
  *   /loop 5m do something        — run every 5 minutes
  *   /loop 2h check the deploy    — run every 2 hours
  *   /loop do something           — infinite loop (proactive mode)
@@ -219,7 +220,7 @@ export function parseLoopArgs(input: string): ParsedLoop {
 
     // Check if first token is a plain integer (count)
     const countMatch = tokens[0].match(/^(\d+)$/);
-    if (countMatch && tokens.length > 1) {
+    if (countMatch) {
         return {
             mode: { kind: "count", count: parseInt(countMatch[1], 10) },
             prompt: tokens.slice(1).join(" "),
