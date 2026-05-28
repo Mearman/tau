@@ -22,6 +22,7 @@ const config: UserConfig = {
                 "release",
                 "ci",
                 "deps",
+                "permissions",
             ],
         ],
     },
