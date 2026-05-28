@@ -11,7 +11,14 @@
 
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    unlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 // ─── Availability ───────────────────────────────────────────────────
@@ -48,7 +55,8 @@ export function shellQuote(value: string): string {
 
 /** Determine the background tmux session name for a given git root. */
 export function sessionNameForGitRoot(gitRoot: string): string {
-    const slug = gitRoot.split("/").pop()?.slice(0, 16).toLowerCase() ?? "project";
+    const slug =
+        gitRoot.split("/").pop()?.slice(0, 16).toLowerCase() ?? "project";
     // Include a short hash to avoid collisions between same-named directories.
     const hash = createHash("md5").update(gitRoot).digest("hex").slice(0, 8);
     return `pi-bg-${slug}-${hash}`;
@@ -57,8 +65,9 @@ export function sessionNameForGitRoot(gitRoot: string): string {
 /** Check whether a tmux session with the given name exists. */
 export function sessionExists(name: string): boolean {
     return (
-        execSafe(`tmux has-session -t ${shellQuote(name)} 2>/dev/null && echo yes`) ===
-        "yes"
+        execSafe(
+            `tmux has-session -t ${shellQuote(name)} 2>/dev/null && echo yes`
+        ) === "yes"
     );
 }
 
@@ -81,7 +90,11 @@ export function listWindows(session: string): TmuxWindow[] {
     if (!raw) return [];
     return raw.split("\n").map((line) => {
         const [id, index, title] = line.split("|||");
-        return { id: id ?? "", index: parseInt(index ?? "0"), title: title ?? "" };
+        return {
+            id: id ?? "",
+            index: parseInt(index ?? "0"),
+            title: title ?? "",
+        };
     });
 }
 
@@ -123,23 +136,21 @@ export function createBashScript(
     runDir: string,
     session: string,
     command: string,
-): { id: string; scriptPath: string } {
+    paths: { id: string; outputFile: string; exitCodeFile: string }
+): { scriptPath: string } {
     const scriptDir = join(runDir, "s");
     mkdirSync(scriptDir, { recursive: true, mode: 0o700 });
     chmodSync(scriptDir, 0o700);
 
-    const id = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const scriptPath = join(scriptDir, `${session}.${id}.sh`);
+    const scriptPath = join(scriptDir, `${session}.${paths.id}.sh`);
+
+    const { exitCodeFile, outputFile } = paths;
 
     writeFileSync(
         scriptPath,
         `#!/usr/bin/env bash
-__run_dir=${shellQuote(runDir)}
-__session=${shellQuote(session)}
-__id=${shellQuote(id)}
-__window_id="$(tmux display-message -p -t "\${TMUX_PANE:-}" '#{window_id}' 2>/dev/null || printf '@0')"
-__exit_code_file="$__run_dir/$__session.$__window_id.$__id"
-__output_file="$__exit_code_file.out"
+__output_file=${shellQuote(outputFile)}
+__exit_code_file=${shellQuote(exitCodeFile)}
 : > "$__output_file"
 (
 ${command}
@@ -150,7 +161,7 @@ printf '%s\\n' "$__rc" > "$__exit_code_file"
         { mode: 0o755 }
     );
 
-    return { id, scriptPath };
+    return { scriptPath };
 }
 
 /**
@@ -163,10 +174,24 @@ export function spawnInTmux(
     command: string,
     cwd: string,
     runDir: string,
-    session: string,
+    session: string
 ): { windowId: string; id: string; outputFile: string; exitCodeFile: string } {
     const exists = sessionExists(session);
-    const script = createBashScript(runDir, session, command);
+
+    // Pre-compute paths before creating the script.
+    // Paths use only session + unique ID — no window ID dependency.
+    // This avoids a mismatch when tmux display-message fails
+    // inside detached sessions (the script used to derive paths
+    // from the window ID independently, leading to empty reads).
+    const id = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const exitCodeFile = join(runDir, `${session}.${id}.exit`);
+    const outputFile = join(runDir, `${session}.${id}.out`);
+
+    const script = createBashScript(runDir, session, command, {
+        id,
+        outputFile,
+        exitCodeFile,
+    });
 
     const createCmd = exists
         ? `new-window -d -t ${shellQuote(session)}`
@@ -177,28 +202,25 @@ export function spawnInTmux(
         `tmux ${createCmd} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} -P -F '#{window_id}' ${shellQuote(script.scriptPath)}`
     );
 
-    // Derive the sentinel file paths from the window ID and run ID.
-    // The script writes exit code to: $runDir/$session.$windowId.$id
-    const exitCodeFile = join(runDir, `${session}.${windowId}.${script.id}`);
-    const outputFile = `${exitCodeFile}.out`;
-
-    return { windowId, id: script.id, outputFile, exitCodeFile };
+    return { windowId, id, outputFile, exitCodeFile };
 }
 
 // ─── Output capture ─────────────────────────────────────────────────
 
 /**
  * Capture the last N lines of a tmux window's pane output.
- * Falls back to reading the output file if tmux capture fails.
+ * Falls back to tmux capture-pane when the output file is empty or missing.
  */
 export function captureOutput(
     windowId: string,
     lines: number,
-    outputFile?: string,
+    outputFile?: string
 ): string {
     // Prefer the tee'd output file — it has the exact content without tmux framing.
+    // Fall back to tmux capture-pane when the file is missing or empty.
     if (outputFile && existsSync(outputFile)) {
-        return readFileSync(outputFile, "utf-8");
+        const content = readFileSync(outputFile, "utf-8");
+        if (content.length > 0) return content;
     }
     // Fallback: capture from tmux pane.
     const raw = execSafe(
@@ -219,7 +241,11 @@ export function checkExitCode(exitCodeFile: string): number | undefined {
     const code = parseInt(content);
     if (!Number.isFinite(code)) return undefined;
     // Clean up the sentinel file.
-    try { unlinkSync(exitCodeFile); } catch { /* already gone */ }
+    try {
+        unlinkSync(exitCodeFile);
+    } catch {
+        /* already gone */
+    }
     return code;
 }
 
