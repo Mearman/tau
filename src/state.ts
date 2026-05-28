@@ -99,4 +99,8 @@ export class TauState {
     permissionDisableBypass = false;
     permissionLastLoadedAt = 0;
     permissionSessionRules: string[] = [];
+    /** Timestamp when the permission mode hint should stop showing. 0 = never show. */
+    permissionModeHintUntil = 0;
+    /** Whether the user has interacted since session start. */
+    hasInteracted = false;
 }

@@ -3,7 +3,7 @@
  *
  * Provides:
  * - /perm — cycle or set permission mode, show current rules, add rules
- * - Ctrl+Tab — cycle permission mode
+ * - Ctrl+Shift+M — cycle permission mode
  * - Ctrl+Shift+T — cycle thinking level
  * - Status bar indicator for current permission mode
  */
@@ -156,9 +156,9 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
         },
     });
 
-    // ── Ctrl+Tab — cycle permission mode ────────────────────────
+    // ── Ctrl+Shift+M — cycle permission mode ───────────────────
 
-    pi.registerShortcut(Key.ctrl("tab"), {
+    pi.registerShortcut(Key.ctrlShift("m"), {
         description: "Cycle permission mode",
         handler: async (ctx) => {
             cycleMode(pi, state, ctx);
@@ -166,8 +166,8 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
     });
 
     // ── Ctrl+Shift+T — cycle thinking level ────────────────────
-    // Replaces Shift+Tab (which was app.thinking.cycle) now that
-    // Shift+Tab is used for permission mode cycling.
+    // Pi core binds shift+tab to app.thinking.cycle; this provides
+    // an additional explicit shortcut.
 
     const THINKING_LEVELS = [
         "off",
@@ -229,13 +229,22 @@ function setMode(
         state.planModeEnabled = false;
     }
 
-    // Update status bar
+    // Update status bar with shortcut hint that fades after 4s
     if (ctx.hasUI) {
         const colour = modeColour(mode);
         ctx.ui.setStatus(
             "tau-perm-mode",
-            ctx.ui.theme.fg(colour, modeStatusText(mode))
+            ctx.ui.theme.fg(colour, modeStatusText(mode, true))
         );
+        state.permissionModeHintUntil = Date.now() + 4000;
+        setTimeout(() => {
+            if (Date.now() >= state.permissionModeHintUntil) {
+                ctx.ui.setStatus(
+                    "tau-perm-mode",
+                    ctx.ui.theme.fg(colour, modeStatusText(mode, false))
+                );
+            }
+        }, 4000);
     }
 
     const title = MODE_TITLES[mode];

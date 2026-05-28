@@ -209,6 +209,19 @@ export default function (pi: ExtensionAPI) {
     pi.on("turn_start", async (_event, ctx) => {
         if (state.agentStartTime !== undefined && !state.agentTimer)
             startAgentTimer(state, ctx);
+
+        // First user interaction — clear the shortcut hint from status bar
+        if (!state.hasInteracted) {
+            state.hasInteracted = true;
+            state.permissionModeHintUntil = 0;
+            if (ctx.hasUI) {
+                const colour = modeColour(state.permissionMode);
+                ctx.ui.setStatus(
+                    "tau-perm-mode",
+                    ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode, false))
+                );
+            }
+        }
     });
 
     pi.on("turn_end", async (event, ctx) => {
@@ -478,13 +491,22 @@ After completing a step, include a [DONE:n] tag in your response.`,
         state.permissionLastLoadedAt = permState.lastLoadedAt;
         state.permissionSessionRules = permState.sessionRules;
 
-        // ── Mode indicator in status bar ───────────────────────────
+        // ── Mode indicator in status bar (with shortcut hint at startup) ──
         if (ctx.hasUI) {
             const colour = modeColour(state.permissionMode);
             ctx.ui.setStatus(
                 "tau-perm-mode",
-                ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode))
+                ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode, true))
             );
+            state.permissionModeHintUntil = Date.now() + 10000;
+            setTimeout(() => {
+                if (Date.now() >= state.permissionModeHintUntil) {
+                    ctx.ui.setStatus(
+                        "tau-perm-mode",
+                        ctx.ui.theme.fg(modeColour(state.permissionMode), modeStatusText(state.permissionMode, false))
+                    );
+                }
+            }, 10000);
         }
 
         // Restore notification config

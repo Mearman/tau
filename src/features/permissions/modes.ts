@@ -79,11 +79,16 @@ export function nextMode(
 
 /**
  * Get the status bar text for the current permission mode.
+ * When showShortcut is true, appends the shortcut key hint.
  */
-export function modeStatusText(mode: PermissionMode): string {
+export function modeStatusText(mode: PermissionMode, showShortcut = false): string {
     const symbol = MODE_SYMBOLS[mode];
     const title = MODE_SHORT_TITLES[mode];
-    return symbol ? `${symbol} ${title}` : title;
+    const base = symbol ? `${symbol} ${title}` : title;
+    if (showShortcut) {
+        return `${base} ^⇧M`;
+    }
+    return base;
 }
 
 /**
