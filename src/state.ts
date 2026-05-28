@@ -55,11 +55,23 @@ export class TauState {
      */
     commandContextReload?: () => Promise<void>;
 
-    // ── Plan mode ────────────────────────────────────────────────────
+    // ── Plan mode (legacy) ────────────────────────────────────────────
 
+    /** @deprecated Legacy plan mode toggle — superseded by permission mode `plan` */
     planModeEnabled = false;
+    /** @deprecated Legacy execution tracking — superseded by task status updates */
     planExecutionMode = false;
+    /** @deprecated Legacy todo items — superseded by task tool */
     planItems: TodoItem[] = [];
+
+    // ── Plan (new) ────────────────────────────────────────────────────
+
+    /** Active plan file slug, derived from session ID. Set when plan mode is entered. */
+    planSlug: string | undefined;
+    /** The permission mode that was active before entering plan mode. */
+    planPreviousMode: PermissionMode | undefined;
+    /** Whether the model has called exit_plan_mode and execution is about to start. */
+    planExiting = false;
 
     // ── Notifications ────────────────────────────────────────────────
 
