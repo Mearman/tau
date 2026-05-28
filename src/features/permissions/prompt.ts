@@ -1,10 +1,15 @@
 /**
  * Permission prompt component — custom TUI for approval/rejection with
- * inline feedback.
+ * destination selection and inline feedback.
  *
- * Ported from permission-gate.ts with adaptations for pi-tui's API.
- * Matches Claude Code's UX: select Yes or No with arrow keys,
- * press Tab to enter an inline feedback input, Enter to submit.
+ * When approving, the user chooses where to persist the allow rule:
+ *   Once     — approve this time only (no persistence)
+ *   Session  — in-memory, lasts until the session ends
+ *   Local    — .claude/settings.local.json (gitignored, personal)
+ *   Project  — .claude/settings.json (shared with team)
+ *   Always   — ~/.claude/settings.json (global, permanent)
+ *
+ * Ported from permission-gate.ts and Claude Code's PermissionPrompt.tsx.
  */
 
 import type {
@@ -15,12 +20,88 @@ import type {
 } from "@earendil-works/pi-tui";
 import { Input, matchesKey, Key, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { PermissionUpdateDestination } from "./types.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface Decision {
     approved: boolean;
     feedback: string;
+    /** Where to persist the allow rule. Undefined means "this time only". */
+    destination?: PermissionUpdateDestination;
+    /** The rule string to persist, e.g. "Bash(git:*)" */
+    rule?: string;
+}
+
+interface PromptOption {
+    label: string;
+    shortLabel: string;
+    key: string; // single-char shortcut
+    value: Decision;
+}
+
+// ─── Destination option builders ────────────────────────────────────
+
+const DESTINATION_OPTIONS: {
+    label: string;
+    shortLabel: string;
+    key: string;
+    destination?: PermissionUpdateDestination;
+}[] = [
+    {
+        label: "Once (this time only)",
+        shortLabel: "Once",
+        key: "o",
+        destination: undefined,
+    },
+    {
+        label: "Session (until session ends)",
+        shortLabel: "Session",
+        key: "s",
+        destination: "session",
+    },
+    {
+        label: "Local (.claude/settings.local.json)",
+        shortLabel: "Local",
+        key: "l",
+        destination: "localSettings",
+    },
+    {
+        label: "Project (.claude/settings.json)",
+        shortLabel: "Project",
+        key: "p",
+        destination: "projectSettings",
+    },
+    {
+        label: "Always (~/.claude/settings.json)",
+        shortLabel: "Always",
+        key: "a",
+        destination: "userSettings",
+    },
+];
+
+function buildOptions(rule?: string): PromptOption[] {
+    const approveOpts = DESTINATION_OPTIONS.map((d) => ({
+        label: d.label,
+        shortLabel: d.shortLabel,
+        key: d.key,
+        value: {
+            approved: true,
+            feedback: "",
+            destination: d.destination,
+            rule,
+        },
+    }));
+
+    return [
+        ...approveOpts,
+        {
+            label: "No (reject)",
+            shortLabel: "No",
+            key: "n",
+            value: { approved: false, feedback: "", rule },
+        },
+    ];
 }
 
 // ─── ANSI helpers ─────────────────────────────────────────────────────
@@ -32,6 +113,7 @@ interface PromptTheme {
     question: (s: string) => string;
     selectedLabel: (s: string) => string;
     mutedLabel: (s: string) => string;
+    keyHint: (key: string, label: string) => string;
     feedbackPrefix: (s: string) => string;
     hint: (s: string) => string;
 }
@@ -41,18 +123,18 @@ const PROMPT_THEME: PromptTheme = {
     question: (s) => s,
     selectedLabel: (s) => ESC + "[7m " + s + " " + ESC + "[27m",
     mutedLabel: (s) => " " + s + " ",
+    keyHint: (key, label) => ESC + "[1m" + key + ESC + "[22m" + ")" + label,
     feedbackPrefix: (s) => ESC + "[36m" + s + ESC + "[39m",
     hint: (s) => ESC + "[2m" + s + ESC + "[22m",
 };
 
 // ─── Permission prompt component ────────────────────────────────────
 
-type FeedbackTarget = "approve" | "reject";
-
 export class PermissionPrompt implements Component, Focusable {
     private question: string;
-    private selectedIndex = 0; // 0 = yes, 1 = no
-    private feedbackTarget: FeedbackTarget | null = null;
+    private options: PromptOption[];
+    private selectedIndex = 0;
+    private feedbackTarget: "approve" | "reject" | null = null;
     private feedbackInput: Input;
     private done: (decision: Decision) => void;
     private _focused = false;
@@ -60,38 +142,30 @@ export class PermissionPrompt implements Component, Focusable {
     private cachedLines: string[] | null = null;
     private cachedWidth: number | null = null;
     private theme: PromptTheme;
-    private showYes: boolean;
-    private showNo: boolean;
 
     constructor(
         question: string,
         done: (decision: Decision) => void,
-        options: { showYes?: boolean; showNo?: boolean } = {}
+        options: { rule?: string } = {}
     ) {
         this.question = question;
         this.done = done;
-        this.showYes = options.showYes ?? true;
-        this.showNo = options.showNo ?? true;
+        this.options = buildOptions(options.rule);
         this.theme = PROMPT_THEME;
 
         this.feedbackInput = new Input();
         this.feedbackInput.onSubmit = () => {
             const feedback = this.feedbackInput.getValue().trim();
-            if (this.feedbackTarget === "approve") {
-                this.done({ approved: true, feedback });
-            } else {
-                this.done({ approved: false, feedback });
-            }
+            const opt = this.options[this.selectedIndex];
+            this.done({
+                ...opt.value,
+                feedback,
+            });
         };
         this.feedbackInput.onEscape = () => {
             this.feedbackTarget = null;
             this.invalidate();
         };
-
-        // Default to "no" if that's the only option
-        if (!this.showYes && this.showNo) {
-            this.selectedIndex = 0;
-        }
     }
 
     get focused(): boolean {
@@ -104,21 +178,6 @@ export class PermissionPrompt implements Component, Focusable {
         }
     }
 
-    private handleSelectionKey(isForward: boolean): void {
-        if (!this.showYes || !this.showNo) return;
-        this.selectedIndex = isForward ? 1 : 0;
-        this.invalidate();
-    }
-
-    private handleTab(): void {
-        if (this.selectedIndex === 0 && this.showYes) {
-            this.feedbackTarget = "approve";
-        } else if (this.showNo) {
-            this.feedbackTarget = "reject";
-        }
-        this.invalidate();
-    }
-
     handleInput(data: string): void {
         // In feedback mode, delegate to the input
         if (this.feedbackTarget !== null) {
@@ -128,21 +187,30 @@ export class PermissionPrompt implements Component, Focusable {
         }
 
         if (matchesKey(data, Key.left) || matchesKey(data, Key.up)) {
-            this.handleSelectionKey(false);
+            this.selectedIndex =
+                (this.selectedIndex - 1 + this.options.length) %
+                this.options.length;
+            this.invalidate();
         } else if (matchesKey(data, Key.right) || matchesKey(data, Key.down)) {
-            this.handleSelectionKey(true);
+            this.selectedIndex = (this.selectedIndex + 1) % this.options.length;
+            this.invalidate();
         } else if (matchesKey(data, Key.tab)) {
-            this.handleTab();
+            const opt = this.options[this.selectedIndex];
+            this.feedbackTarget = opt.value.approved ? "approve" : "reject";
+            this.invalidate();
         } else if (matchesKey(data, Key.enter)) {
-            this.submitSelected();
+            const opt = this.options[this.selectedIndex];
+            this.done(opt.value);
         } else if (matchesKey(data, Key.escape)) {
-            this.done({ approved: false, feedback: "" });
+            this.done({ approved: false, feedback: "", rule: undefined });
+        } else {
+            // Shortcut key matching
+            const ch = data.length === 1 ? data.toLowerCase() : "";
+            const idx = this.options.findIndex((o) => o.key === ch);
+            if (idx !== -1) {
+                this.done(this.options[idx].value);
+            }
         }
-    }
-
-    private submitSelected(): void {
-        const approved = this.selectedIndex === 0 && this.showYes;
-        this.done({ approved, feedback: "" });
     }
 
     invalidate(): void {
@@ -183,9 +251,8 @@ export class PermissionPrompt implements Component, Focusable {
         }
 
         if (this.feedbackTarget !== null) {
-            const target = this.feedbackTarget;
             const label =
-                target === "approve"
+                this.feedbackTarget === "approve"
                     ? "Approve with feedback"
                     : "Reject with feedback";
             lines.push(styledLine(theme.feedbackPrefix(label + ":")));
@@ -209,32 +276,20 @@ export class PermissionPrompt implements Component, Focusable {
                 styledLine(theme.hint("Enter to submit * Escape to go back"))
             );
         } else {
-            const options: { label: string; selected: boolean }[] = [];
-            if (this.showYes) {
-                options.push({
-                    label: "Yes",
-                    selected: this.selectedIndex === 0,
-                });
+            // Show options as a list with key shortcuts
+            for (let i = 0; i < this.options.length; i++) {
+                const opt = this.options[i];
+                const isSelected = i === this.selectedIndex;
+                const prefix = theme.keyHint(opt.key, " ");
+                const label = isSelected
+                    ? theme.selectedLabel(prefix + opt.shortLabel)
+                    : theme.mutedLabel(prefix + opt.shortLabel);
+                lines.push(styledLine(label));
             }
-            if (this.showNo) {
-                options.push({
-                    label: "No",
-                    selected: this.selectedIndex === (this.showYes ? 1 : 0),
-                });
-            }
-
-            const buttonLine = options
-                .map((opt) =>
-                    opt.selected
-                        ? theme.selectedLabel(opt.label)
-                        : theme.mutedLabel(opt.label)
-                )
-                .join("  ");
-            lines.push(styledLine(buttonLine));
             lines.push(
                 styledLine(
                     theme.hint(
-                        "← → to select * Tab to add feedback * Enter to confirm * Esc to reject"
+                        "↑ ↓ to select * Tab for feedback * Enter to confirm * Esc to reject"
                     )
                 )
             );
@@ -281,12 +336,12 @@ function wrapLines(text: string, maxWidth: number): string[] {
  *
  * @param ctx Extension context (for ui.custom)
  * @param question The question to display
- * @param options Whether to show Yes/No buttons
+ * @param options.rule The rule string to persist if approved with a destination
  */
 export async function promptPermission(
     ctx: ExtensionContext,
     question: string,
-    options: { showYes?: boolean; showNo?: boolean } = {}
+    options: { rule?: string } = {}
 ): Promise<Decision> {
     return ctx.ui.custom<Decision>(
         (
