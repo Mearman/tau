@@ -24,6 +24,7 @@ import {
     loadAllPermissions,
     getToolInput,
     normaliseToolInput,
+    writeRuleToSettings,
 } from "./config.js";
 import { findMatchingRule } from "./rules.js";
 import {
@@ -37,6 +38,7 @@ import {
     isDangerousFilePath,
 } from "./filesystem.js";
 import { promptPermission } from "./prompt.js";
+import { basename, resolve } from "node:path";
 
 // ─── Permission state ────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ export interface PermissionState {
     additionalDirectories: Set<string>;
     disableBypass: boolean;
     lastLoadedAt: number;
+    sessionRules: string[];
 }
 
 // Re-check settings every 60 seconds
@@ -70,6 +73,86 @@ const SETTINGS_RELOAD_INTERVAL_MS = 60_000;
 function getPath(input: Record<string, unknown>): string {
     const p = input.path;
     return typeof p === "string" ? p : "";
+}
+
+/**
+ * Build a permission rule string from a tool call event.
+ * e.g. toolName="Bash", input="git commit -m \"foo\"" → "Bash(git:*)"
+ * e.g. toolName="Edit", path="src/foo.ts" → "Edit(foo.ts)"
+ */
+function ruleForToolCall(
+    toolName: string, // Claude Code convention
+    input: Record<string, unknown>
+): string {
+    switch (toolName) {
+        case "Bash": {
+            const cmd = typeof input.command === "string" ? input.command : "";
+            if (!cmd) return "Bash";
+            // Extract base command for prefix rule
+            const base = cmd.trim().split(/\s+/)[0] ?? "";
+            return base ? `Bash(${base}:*)` : "Bash";
+        }
+        case "Read":
+        case "Edit":
+        case "Write": {
+            const p = getPath(input);
+            if (!p) return toolName;
+            return `${toolName}(${basename(resolve(p))})`;
+        }
+        default:
+            return toolName;
+    }
+}
+
+/**
+ * Handle a permission decision's destination — persist the rule if needed.
+ */
+async function handleDecisionDestination(
+    decision: {
+        approved: boolean;
+        feedback: string;
+        destination?: import("./types.js").PermissionUpdateDestination;
+        rule?: string;
+    },
+    state: PermissionState,
+    cwd: string
+): Promise<PermissionState> {
+    if (!decision.approved || !decision.destination || !decision.rule) {
+        return state;
+    }
+
+    if (decision.destination === "session") {
+        // Add to in-memory session rules
+        if (!state.sessionRules.includes(decision.rule)) {
+            return {
+                ...state,
+                sessionRules: [...state.sessionRules, decision.rule],
+                rules: [
+                    ...state.rules,
+                    {
+                        rule: decision.rule,
+                        behavior: "allow",
+                        source: "session",
+                    },
+                ],
+            };
+        }
+        return state;
+    }
+
+    // Write to the appropriate settings file
+    const written = writeRuleToSettings(
+        decision.rule,
+        decision.destination,
+        cwd
+    );
+
+    if (written) {
+        // Reload to pick up the new rule
+        return reloadSettingsIfNeeded(state, cwd);
+    }
+
+    return state;
 }
 
 export async function checkToolPermission(
@@ -141,7 +224,7 @@ export async function checkToolPermission(
             const decision = await promptPermission(
                 ctx,
                 `Allow editing sensitive file: ${path}?\n\nThis file is protected for safety and always requires approval.`,
-                { showYes: true, showNo: true }
+                { rule: `Edit(${basename(resolve(path))})` }
             );
             if (!decision.approved) {
                 return {
@@ -149,6 +232,8 @@ export async function checkToolPermission(
                     reason: `Safety check: editing ${path} was rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
                 };
             }
+            // Persist if user chose a destination
+            await handleDecisionDestination(decision, state, cwd);
             return { block: false };
         }
     }
@@ -207,7 +292,7 @@ export async function checkToolPermission(
             const decision = await promptPermission(
                 ctx,
                 `Allow bash command?\n\n${input}\n\nRule requires approval: ${bashResult.rule.rule}`,
-                { showYes: true, showNo: true }
+                { rule: bashResult.rule.rule }
             );
             if (!decision.approved) {
                 return {
@@ -215,6 +300,7 @@ export async function checkToolPermission(
                     reason: `Bash command rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
                 };
             }
+            await handleDecisionDestination(decision, state, cwd);
             return { block: false };
         }
     } else {
@@ -228,7 +314,7 @@ export async function checkToolPermission(
             const decision = await promptPermission(
                 ctx,
                 `Allow ${toolName} for ${normalised || "(any)"}?\n\nRule requires approval: ${askRule.rule}`,
-                { showYes: true, showNo: true }
+                { rule: askRule.rule }
             );
             if (!decision.approved) {
                 return {
@@ -236,6 +322,7 @@ export async function checkToolPermission(
                     reason: `${toolName} rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
                 };
             }
+            await handleDecisionDestination(decision, state, cwd);
             return { block: false };
         }
     }
@@ -259,7 +346,7 @@ export async function checkToolPermission(
         const decision = await promptPermission(
             ctx,
             `Allow reading ${path}?\n\n${result.reason}`,
-            { showYes: true, showNo: true }
+            { rule: `Read(${basename(resolve(path))})` }
         );
         if (!decision.approved) {
             return {
@@ -267,6 +354,7 @@ export async function checkToolPermission(
                 reason: `Read rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
             };
         }
+        await handleDecisionDestination(decision, state, cwd);
         return { block: false };
     }
 
@@ -287,7 +375,7 @@ export async function checkToolPermission(
         const decision = await promptPermission(
             ctx,
             `Allow ${toolName.toLowerCase()} for ${path}?\n\n${result.reason}`,
-            { showYes: true, showNo: true }
+            { rule: `${toolName}(${basename(resolve(path))})` }
         );
         if (!decision.approved) {
             return {
@@ -295,6 +383,7 @@ export async function checkToolPermission(
                 reason: `${toolName} rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
             };
         }
+        await handleDecisionDestination(decision, state, cwd);
         return { block: false };
     }
 
@@ -304,7 +393,9 @@ export async function checkToolPermission(
             const decision = await promptPermission(
                 ctx,
                 `Allow bash command?\n\n${input}`,
-                { showYes: true, showNo: true }
+                {
+                    rule: ruleForToolCall(toolName, event.input),
+                }
             );
             if (!decision.approved) {
                 return {
@@ -312,6 +403,7 @@ export async function checkToolPermission(
                     reason: `Bash command rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
                 };
             }
+            await handleDecisionDestination(decision, state, cwd);
             return { block: false };
         }
 
@@ -319,7 +411,7 @@ export async function checkToolPermission(
         const decision = await promptPermission(
             ctx,
             `Allow ${toolName}?${normalised ? ` (${normalised})` : ""}`,
-            { showYes: true, showNo: true }
+            { rule: toolName }
         );
         if (!decision.approved) {
             return {
@@ -327,6 +419,7 @@ export async function checkToolPermission(
                 reason: `${toolName} rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
             };
         }
+        await handleDecisionDestination(decision, state, cwd);
         return { block: false };
     }
 
@@ -355,6 +448,7 @@ export async function reloadSettingsIfNeeded(
         additionalDirectories: new Set(loaded.additionalDirectories),
         disableBypass: loaded.disableBypassPermissions,
         lastLoadedAt: now,
+        sessionRules: state.sessionRules, // preserved across reloads
     };
 }
 
@@ -371,6 +465,7 @@ export async function initPermissionState(
         additionalDirectories: new Set(loaded.additionalDirectories),
         disableBypass: loaded.disableBypassPermissions,
         lastLoadedAt: Date.now(),
+        sessionRules: [],
     };
 }
 
