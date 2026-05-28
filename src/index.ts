@@ -328,10 +328,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
                                 }
                                 // else: still running — reattach the context
                                 attachTmuxContext(
-                                    jobData as import("./types.js").BackgroundJob,
-                                    tmux as import(
-                                        "./features/bash-tmux.js"
-                                    ).TmuxJobContext
+                                    jobData,
+                                    tmux as import("./features/bash-tmux.js").TmuxJobContext
                                 );
                             } else {
                                 // Direct-spawn job — check if pid is alive
