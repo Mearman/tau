@@ -218,7 +218,10 @@ export default function (pi: ExtensionAPI) {
                 const colour = modeColour(state.permissionMode);
                 ctx.ui.setStatus(
                     "tau-perm-mode",
-                    ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode, false))
+                    ctx.ui.theme.fg(
+                        colour,
+                        modeStatusText(state.permissionMode, false)
+                    )
                 );
             }
         }
@@ -496,14 +499,20 @@ After completing a step, include a [DONE:n] tag in your response.`,
             const colour = modeColour(state.permissionMode);
             ctx.ui.setStatus(
                 "tau-perm-mode",
-                ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode, true))
+                ctx.ui.theme.fg(
+                    colour,
+                    modeStatusText(state.permissionMode, true)
+                )
             );
             state.permissionModeHintUntil = Date.now() + 10000;
             setTimeout(() => {
                 if (Date.now() >= state.permissionModeHintUntil) {
                     ctx.ui.setStatus(
                         "tau-perm-mode",
-                        ctx.ui.theme.fg(modeColour(state.permissionMode), modeStatusText(state.permissionMode, false))
+                        ctx.ui.theme.fg(
+                            modeColour(state.permissionMode),
+                            modeStatusText(state.permissionMode, false)
+                        )
                     );
                 }
             }, 10000);
