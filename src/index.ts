@@ -4,11 +4,12 @@
  * Background tasks, notifications, plan mode, presets, and other enhancements.
  *
  * Tools: bash (overridden), bash_bg, jobs, job_decide, task
- * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /bookmark, /unbookmark,
- *           /context, /footer, /notifications, /preset,
+ * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /perm, /bookmark,
+ *           /unbookmark, /context, /footer, /notifications, /preset,
  *           /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
- *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle)
+ *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle),
+ *            Ctrl+Shift+P (permission mode cycle)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -25,6 +26,13 @@ import {
     extractTodoItems,
     markCompletedSteps,
 } from "./plan-utils.ts";
+import {
+    initPermissionState,
+    reloadSettingsIfNeeded,
+    checkToolPermission,
+    modeStatusText,
+    modeColour,
+} from "./features/permissions/index.js";
 import {
     isAssistantMessage,
     getTextContent,
@@ -69,6 +77,7 @@ import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
+import { registerPermissions } from "./features/permissions/commands.js";
 import { isTmuxAvailable } from "./tmux.ts";
 import {
     cleanupTmuxRunDir,
@@ -103,6 +112,7 @@ export default function (pi: ExtensionAPI) {
     registerWebBrowse(pi);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
+    registerPermissions(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
@@ -112,7 +122,7 @@ export default function (pi: ExtensionAPI) {
         startAgentTimer(state, ctx);
     });
 
-    pi.on("tool_call", async (event): Promise<ToolCallEventResult> => {
+    pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult> => {
         // Agent backgrounding
         if (state.agentBackgrounded) {
             return { block: true, reason: "" };
@@ -136,7 +146,39 @@ export default function (pi: ExtensionAPI) {
             };
         }
 
-        // Plan-mode: block destructive bash commands
+        // ── Permission system ──────────────────────────────────────
+
+        // Reload settings if stale
+        const permState = await reloadSettingsIfNeeded(
+            {
+                mode: state.permissionMode,
+                rules: state.permissionRules,
+                additionalDirectories: state.permissionAdditionalDirectories,
+                disableBypass: state.permissionDisableBypass,
+                lastLoadedAt: state.permissionLastLoadedAt,
+            },
+            ctx.cwd
+        );
+        state.permissionMode = permState.mode;
+        state.permissionRules = permState.rules;
+        state.permissionAdditionalDirectories = permState.additionalDirectories;
+        state.permissionDisableBypass = permState.disableBypass;
+        state.permissionLastLoadedAt = permState.lastLoadedAt;
+
+        // Run the permission pipeline
+        const permResult = await checkToolPermission(
+            event,
+            permState,
+            ctx.cwd,
+            ctx
+        );
+        if (permResult.block) {
+            return permResult;
+        }
+
+        // ── Legacy plan-mode bash filtering ─────────────────────────
+        // This is superseded by the permission system's plan mode but
+        // kept as a secondary guard for the /plan command toggle.
         if (state.planModeEnabled && event.toolName === "bash") {
             const command = event.input.command as string;
             if (!isSafeCommand(command)) {
@@ -424,6 +466,23 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
         // Restore tools-selector state
         restoreToolsFromBranch(pi, state, ctx);
+
+        // ── Permission state initialisation ────────────────────────
+        const permState = await initPermissionState(ctx.cwd);
+        state.permissionMode = permState.mode;
+        state.permissionRules = permState.rules;
+        state.permissionAdditionalDirectories = permState.additionalDirectories;
+        state.permissionDisableBypass = permState.disableBypass;
+        state.permissionLastLoadedAt = permState.lastLoadedAt;
+
+        // ── Mode indicator in status bar ───────────────────────────
+        if (state.permissionMode !== "ask" && ctx.hasUI) {
+            const colour = modeColour(state.permissionMode);
+            ctx.ui.setStatus(
+                "tau-perm-mode",
+                ctx.ui.theme.fg(colour, modeStatusText(state.permissionMode))
+            );
+        }
 
         // Restore notification config
         for (const entry of ctx.sessionManager.getBranch()) {
