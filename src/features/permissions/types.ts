@@ -61,6 +61,23 @@ export interface PermissionCheckResult {
     reason: string;
 }
 
+// ─── Permission updates (allow destinations) ──────────────────────────
+
+export type PermissionUpdateDestination =
+    | "session"
+    | "localSettings"
+    | "projectSettings"
+    | "userSettings";
+
+export interface PermissionUpdate {
+    /** The rule to persist, e.g. "Bash(git commit:*)" */
+    rule: string;
+    /** Always "allow" for approval persistence */
+    behavior: "allow";
+    /** Where to persist the rule */
+    destination: PermissionUpdateDestination;
+}
+
 // ─── Tool name mapping ───────────────────────────────────────────────
 
 /** Map pi tool names to Claude Code convention for rule matching */
