@@ -35,7 +35,7 @@ export const MODE_SHORT_TITLES: Record<PermissionMode, string> = {
 };
 
 export const MODE_SYMBOLS: Record<PermissionMode, string> = {
-    ask: "",
+    ask: "🔒",
     edit: "✎",
     plan: "⏸",
     allow: "✓",

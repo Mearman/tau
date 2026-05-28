@@ -151,15 +151,11 @@ function setMode(
 
     // Update status bar
     if (ctx.hasUI) {
-        if (mode === "allow") {
-            ctx.ui.setStatus("tau-perm-mode", undefined);
-        } else {
-            const colour = modeColour(mode);
-            ctx.ui.setStatus(
-                "tau-perm-mode",
-                ctx.ui.theme.fg(colour, modeStatusText(mode))
-            );
-        }
+        const colour = modeColour(mode);
+        ctx.ui.setStatus(
+            "tau-perm-mode",
+            ctx.ui.theme.fg(colour, modeStatusText(mode))
+        );
     }
 
     const title = MODE_TITLES[mode];
