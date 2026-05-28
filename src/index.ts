@@ -156,6 +156,7 @@ export default function (pi: ExtensionAPI) {
                 additionalDirectories: state.permissionAdditionalDirectories,
                 disableBypass: state.permissionDisableBypass,
                 lastLoadedAt: state.permissionLastLoadedAt,
+                sessionRules: state.permissionSessionRules,
             },
             ctx.cwd
         );
@@ -164,6 +165,7 @@ export default function (pi: ExtensionAPI) {
         state.permissionAdditionalDirectories = permState.additionalDirectories;
         state.permissionDisableBypass = permState.disableBypass;
         state.permissionLastLoadedAt = permState.lastLoadedAt;
+        state.permissionSessionRules = permState.sessionRules;
 
         // Run the permission pipeline
         const permResult = await checkToolPermission(
@@ -474,6 +476,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
         state.permissionAdditionalDirectories = permState.additionalDirectories;
         state.permissionDisableBypass = permState.disableBypass;
         state.permissionLastLoadedAt = permState.lastLoadedAt;
+        state.permissionSessionRules = permState.sessionRules;
 
         // ── Mode indicator in status bar ───────────────────────────
         if (ctx.hasUI) {
