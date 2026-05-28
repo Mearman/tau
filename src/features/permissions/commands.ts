@@ -3,8 +3,8 @@
  *
  * Provides:
  * - /perm — cycle or set permission mode, show current rules, add rules
- * - Shift+Tab — cycle permission mode
- * - Ctrl+Shift+T — cycle thinking level (replaces Shift+Tab which is now permission cycling)
+ * - Ctrl+Tab — cycle permission mode
+ * - Ctrl+Shift+T — cycle thinking level
  * - Status bar indicator for current permission mode
  */
 
@@ -156,9 +156,9 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
         },
     });
 
-    // ── Shift+Tab — cycle permission mode ──────────────────────
+    // ── Ctrl+Tab — cycle permission mode ────────────────────────
 
-    pi.registerShortcut(Key.shift("tab"), {
+    pi.registerShortcut(Key.ctrl("tab"), {
         description: "Cycle permission mode",
         handler: async (ctx) => {
             cycleMode(pi, state, ctx);
