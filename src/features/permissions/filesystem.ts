@@ -287,10 +287,7 @@ function checkWritePermissionInner(
     }
 
     // 4. edit mode + path in working dir
-    if (
-        mode === "edit" &&
-        pathInWorkingDir(path, cwd, additionalDirectories)
-    ) {
+    if (mode === "edit" && pathInWorkingDir(path, cwd, additionalDirectories)) {
         return {
             decision: "allow",
             reason: "edit mode: write allowed within working directory.",
