@@ -93,7 +93,7 @@ export class TauState {
 
     // ── Permissions ─────────────────────────────────────────────────
 
-    permissionMode: PermissionMode = "ask";
+    permissionMode: PermissionMode = "allow";
     permissionRules: PermissionRule[] = [];
     permissionAdditionalDirectories = new Set<string>();
     permissionDisableBypass = false;

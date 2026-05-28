@@ -71,7 +71,7 @@ export function nextMode(
         : PERMISSION_MODES.filter((m) => m !== "allow");
 
     const idx = available.indexOf(current);
-    if (idx === -1) return "ask";
+    if (idx === -1) return "allow";
     return available[(idx + 1) % available.length];
 }
 
