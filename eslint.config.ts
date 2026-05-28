@@ -17,7 +17,10 @@ export default defineConfig(
         languageOptions: {
             parserOptions: {
                 projectService: {
-                    allowDefaultProject: ["bridge/*.ts", "commitlint.config.ts"],
+                    allowDefaultProject: [
+                        "bridge/*.ts",
+                        "commitlint.config.ts",
+                    ],
                 },
                 tsconfigRootDir: import.meta.dirname,
             },
