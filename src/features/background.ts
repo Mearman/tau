@@ -51,6 +51,7 @@ import {
     spawnForegroundTmux,
     notifyTmuxCompletion,
 } from "./bash-tmux.ts";
+import { captureOutput } from "../tmux.ts";
 
 // ─── Kill helpers ───────────────────────────────────────────────────
 
@@ -1279,7 +1280,11 @@ async function executeTmuxForeground(
         // Command completed quickly
         if (initialResult !== null) {
             state.backgroundJobs.delete(jobId);
-            const output = await readFile(logPath, "utf-8").catch(() => "");
+            const output = captureOutput(
+                tmuxCtx.windowId,
+                2000,
+                tmuxCtx.outputFile
+            );
             // Clean up tmux window and session if empty
             killWindow(tmuxCtx.windowId);
             // Kill the session if this was the last window (cleans up idle initial shells)
@@ -1392,7 +1397,11 @@ async function executeTmuxForeground(
         }
         state.backgroundJobs.delete(jobId);
 
-        const output = await readFile(logPath, "utf-8").catch(() => "");
+        const output = captureOutput(
+            tmuxCtx.windowId,
+            2000,
+            tmuxCtx.outputFile
+        );
         killWindow(tmuxCtx.windowId);
         execSafe(
             `tmux kill-session -t ${shellQuote(tmuxCtx.session)} 2>/dev/null`
