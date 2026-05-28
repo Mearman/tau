@@ -2,9 +2,10 @@
  * Permission mode commands and keybindings.
  *
  * Provides:
- * - /perm — cycle or set permission mode, show current rules
- * - Ctrl+Shift+P — cycle permission mode
- * - Status bar indicator for non-default modes
+ * - /perm — cycle or set permission mode, show current rules, add rules
+ * - Shift+Tab — cycle permission mode
+ * - Ctrl+Shift+T — cycle thinking level (replaces Shift+Tab which is now permission cycling)
+ * - Status bar indicator for current permission mode
  */
 
 import type {
@@ -155,12 +156,35 @@ export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
         },
     });
 
-    // ── Ctrl+Shift+P — cycle permission mode ──────────────────────
+    // ── Shift+Tab — cycle permission mode ──────────────────────
 
-    pi.registerShortcut(Key.tab, {
+    pi.registerShortcut(Key.shift("tab"), {
         description: "Cycle permission mode",
         handler: async (ctx) => {
             cycleMode(pi, state, ctx);
+        },
+    });
+
+    // ── Ctrl+Shift+T — cycle thinking level ────────────────────
+    // Replaces Shift+Tab (which was app.thinking.cycle) now that
+    // Shift+Tab is used for permission mode cycling.
+
+    const THINKING_LEVELS = [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    ] as const;
+
+    pi.registerShortcut(Key.ctrlShift("t"), {
+        description: "Cycle thinking level",
+        handler: async (_ctx) => {
+            const current = pi.getThinkingLevel();
+            const idx = THINKING_LEVELS.indexOf(current);
+            const next = THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length];
+            pi.setThinkingLevel(next);
         },
     });
 }
