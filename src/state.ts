@@ -98,4 +98,5 @@ export class TauState {
     permissionAdditionalDirectories = new Set<string>();
     permissionDisableBypass = false;
     permissionLastLoadedAt = 0;
+    permissionSessionRules: string[] = [];
 }
