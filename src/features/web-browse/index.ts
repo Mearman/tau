@@ -407,7 +407,7 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             "Use 'markdown' format when you need structured content with headings, links, and tables.",
             "Use 'structure' format when you need machine-readable JSON data from the page.",
             "Tab IDs are mode-specific. If you got a tab ID from chrome_list with browser: 'bridge', " +
-            "use browser: 'bridge' for the subsequent web_browse call — NOT 'cdp' or 'applescript'.",
+                "use browser: 'bridge' for the subsequent web_browse call — NOT 'cdp' or 'applescript'.",
             "Use browser: 'cdp' with tabId to read content from the user's open Chrome tabs (call chrome_list first to get tab IDs).",
             "Use browser: 'applescript' with tabId for read-only access to the user's Chrome without needing CDP setup.",
         ],

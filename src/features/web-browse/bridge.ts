@@ -335,7 +335,6 @@ async function getDefaultSocketPath(): Promise<string> {
     return socketPaths[0];
 }
 
-
 /** Find which socket owns a tab by its ID. */
 async function findSocketForTab(tabId: number): Promise<string> {
     const socketPaths = findActiveSockets();
