@@ -107,8 +107,10 @@ const BROWSER_PARAM = StringEnum(
 const TAB_ID_PARAM = Type.Optional(
     Type.Number({
         description:
-            "Tab ID from chrome_list output. Required for browser: 'cdp' and browser: 'applescript'. " +
-            "Call chrome_list first to see available tabs and their IDs.",
+            "Tab ID from chrome_list output. Tab IDs are specific to the browser mode — " +
+            "a tab ID from bridge mode will NOT work in CDP mode and vice versa. " +
+            "Always use chrome_list with the same browser mode you plan to use for the subsequent operation. " +
+            "Required for browser: 'cdp' and browser: 'applescript'.",
     })
 );
 
@@ -248,6 +250,9 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
         promptSnippet: "List the user's open Chrome tabs",
         promptGuidelines: [
             "Use chrome_list to see what tabs the user has open before operating on a specific tab.",
+            "Tab IDs are mode-specific — a tab ID from bridge mode will NOT work in CDP or applescript mode.",
+            "Always call chrome_list with the same browser mode you will use for subsequent operations on those tabs.",
+            "If you get 'Tab ID not found', you likely mixed modes. Re-list with the correct browser mode.",
         ],
         parameters: Type.Object({
             browser: Type.Optional(
@@ -401,6 +406,8 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             "Use web_browse instead of bash with curl/wget when the page requires JavaScript rendering.",
             "Use 'markdown' format when you need structured content with headings, links, and tables.",
             "Use 'structure' format when you need machine-readable JSON data from the page.",
+            "Tab IDs are mode-specific. If you got a tab ID from chrome_list with browser: 'bridge', " +
+            "use browser: 'bridge' for the subsequent web_browse call — NOT 'cdp' or 'applescript'.",
             "Use browser: 'cdp' with tabId to read content from the user's open Chrome tabs (call chrome_list first to get tab IDs).",
             "Use browser: 'applescript' with tabId for read-only access to the user's Chrome without needing CDP setup.",
         ],
