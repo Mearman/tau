@@ -24,9 +24,13 @@ import {
 	rmdir,
 	stat,
 	unlink,
+	writeFile,
 } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { homedir, platform } from "node:os";
+import { promisify } from "node:util";
 import { join } from "node:path";
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -34,6 +38,7 @@ import { join } from "node:path";
 const MAX_MESSAGE_SIZE = 1024 * 1024; // 1 MB
 const SOCKET_DIR = `/tmp/pi-chrome-bridge-${getUsername()}`;
 const SOCKET_PATH = join(SOCKET_DIR, `${process.pid}.sock`);
+const SIDECAR_PATH = join(SOCKET_DIR, `${process.pid}.profile.json`);
 
 function getUsername(): string {
 	try {
@@ -53,6 +58,134 @@ async function log(message: string, ...args: unknown[]): Promise<void> {
 	const logLine = `[${timestamp}] ${message}${formattedArgs}\n`;
 	process.stderr.write(`[Pi Chrome Bridge] ${message}${formattedArgs}`);
 	void appendFile(LOG_FILE, logLine).catch(() => {});
+}
+
+// ── Chrome profile resolution ────────────────────────────────────────
+
+const CHROME_USER_DATA_DIR =
+	platform() === "darwin"
+		? join(homedir(), "Library", "Application Support", "Google", "Chrome")
+		: join(homedir(), ".config", "google-chrome");
+const LOCAL_STATE_FILE = join(CHROME_USER_DATA_DIR, "Local State");
+const execFileAsync = promisify(execFile);
+
+interface ProfileIdentity {
+	profileDir: string;
+	profileName: string;
+	email: string;
+}
+
+interface ProfileInfo {
+	name: string;
+	userName: string;
+	gaiaId: string;
+	gaiaName: string;
+}
+
+/** Resolved profile identity for this host's Chrome profile. */
+let profileIdentity: ProfileIdentity | null = null;
+
+function parseLocalStateProfiles(): Map<string, ProfileInfo> {
+	try {
+		const content = readFileSync(LOCAL_STATE_FILE, "utf-8");
+		const state = JSON.parse(content) as {
+			profile?: {
+				info_cache?: Record<
+					string,
+					{ name?: string; user_name?: string; gaia_id?: string; gaia_name?: string }
+				>;
+			};
+		};
+		const profiles = new Map<string, ProfileInfo>();
+		for (const [dirName, info] of Object.entries(state.profile?.info_cache ?? {})) {
+			profiles.set(dirName, {
+				name: info.name ?? dirName,
+				userName: info.user_name ?? "",
+				gaiaId: info.gaia_id ?? "",
+				gaiaName: info.gaia_name ?? "",
+			});
+		}
+		return profiles;
+	} catch {
+		return new Map();
+	}
+}
+
+async function cookieMarkerExists(dbPath: string, markerName: string): Promise<boolean> {
+	const script = [
+		"import sqlite3, sys",
+		"db_path = sys.argv[1]",
+		"marker = sys.argv[2]",
+		"try:",
+		"    conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)",
+		"    cur = conn.cursor()",
+		"    cur.execute('select 1 from cookies where name=? limit 1', (marker,))",
+		"    row = cur.fetchone()",
+		"    print('1' if row else '0')",
+		"except Exception:",
+		"    print('0')",
+		"finally:",
+		"    try:",
+		"        conn.close()",
+		"    except Exception:",
+		"        pass",
+	].join("\n");
+
+	const { stdout } = await execFileAsync("python3", ["-c", script, dbPath, markerName], {
+		timeout: 5000,
+	});
+	return stdout.trim() === "1";
+}
+
+async function resolveProfileFromMarker(markerName: string): Promise<ProfileIdentity | null> {
+	if (!markerName) return null;
+	const profiles = parseLocalStateProfiles();
+	for (let attempt = 0; attempt < 10; attempt++) {
+		for (const [dirName, info] of profiles) {
+			const cookieDb = join(CHROME_USER_DATA_DIR, dirName, "Cookies");
+			try {
+				if (await cookieMarkerExists(cookieDb, markerName)) {
+					return {
+						profileDir: dirName,
+						profileName: info.name,
+						email: info.userName,
+					};
+				}
+			} catch {
+				// Ignore per-profile query failures
+			}
+		}
+		await new Promise((resolve) => setTimeout(resolve, 200));
+	}
+	return null;
+}
+
+/** Write the profile sidecar file. */
+async function writeSidecar(identity: ProfileIdentity): Promise<void> {
+	const data = JSON.stringify({ pid: process.pid, profileDir: identity.profileDir, profile: identity.profileName, email: identity.email }, null, 2);
+	await writeFile(SIDECAR_PATH, data, "utf-8");
+	await chmod(SIDECAR_PATH, 0o600).catch(() => {});
+}
+
+/** Remove the sidecar file. */
+async function removeSidecar(): Promise<void> {
+	try { await unlink(SIDECAR_PATH); } catch { /* fine */ }
+}
+
+/** Handle the "identify" message from the Chrome extension. */
+async function handleIdentify(markerName: string): Promise<void> {
+	await removeSidecar();
+	const resolved = await resolveProfileFromMarker(markerName);
+	if (resolved) {
+		profileIdentity = resolved;
+		await writeSidecar(resolved);
+		await log(`Profile resolved: ${resolved.profileName} (${resolved.profileDir}) via marker ${markerName}`);
+		return;
+	}
+	await log(`Could not resolve profile for marker="${markerName}". Writing unknown sidecar.`);
+	const fallback: ProfileIdentity = { profileDir: "unknown", profileName: "Unknown Profile", email: "" };
+	profileIdentity = fallback;
+	await writeSidecar(fallback);
 }
 
 // ── Chrome native messaging protocol ─────────────────────────────────
@@ -203,11 +336,19 @@ function handleChromeMessage(rawMessage: string): void {
 			sendChromeMessage({ type: "pong", timestamp: Date.now() });
 			break;
 
+		case "identify": {
+			const markerName = (message.markerName as string) ?? "";
+			void log(`identify received: marker="${markerName}"`);
+			handleIdentify(markerName).catch((err) => { log(`Profile resolution failed: ${err}`); });
+			break;
+		}
+
 		case "get_status":
 			sendChromeMessage({
 				type: "status_response",
-				native_host_version: "1.0.0",
+				native_host_version: "1.1.0",
 				pi_clients: piClients.size,
+				profile: profileIdentity?.profileName ?? null,
 			});
 			break;
 
@@ -270,16 +411,17 @@ async function startSocketServer(): Promise<void> {
 	try {
 		const files = await readdir(SOCKET_DIR);
 		for (const file of files) {
-			if (!file.endsWith(".sock")) continue;
-			const pid = parseInt(file.replace(".sock", ""), 10);
+			if (!file.endsWith(".sock") && !file.endsWith(".profile.json")) continue;
+			const base = file.replace(/\.sock$|\.profile\.json$/, "");
+			const pid = parseInt(base, 10);
 			if (isNaN(pid)) continue;
 			try {
 				process.kill(pid, 0);
-				// Process is alive — leave its socket
+				// Process is alive — leave its files
 			} catch {
 				// Process is dead — clean up
 				await unlink(join(SOCKET_DIR, file)).catch(() => {});
-				log(`Removed stale socket for PID ${pid}`);
+				log(`Removed stale file for PID ${pid}: ${file}`);
 			}
 		}
 	} catch {
@@ -409,12 +551,9 @@ async function stopSocketServer(): Promise<void> {
 		server = null;
 	}
 
-	// Clean up socket file
-	try {
-		await unlink(SOCKET_PATH);
-	} catch {
-		// Fine
-	}
+	// Clean up socket and sidecar files
+	await unlink(SOCKET_PATH).catch(() => {});
+	await removeSidecar();
 
 	// Remove directory if empty
 	try {
@@ -430,7 +569,7 @@ async function stopSocketServer(): Promise<void> {
 // ── Main loop ────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-	await log("Native messaging host starting...");
+	await log("Native messaging host starting (v1.1.0)...");
 	await startSocketServer();
 	await log("Ready — waiting for Chrome extension messages on stdin");
 

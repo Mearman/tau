@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Pi Chrome Bridge",
-  "version": "1.0.0",
-  "description": "Bridge between Pi coding agent and Chrome \u2014 enables tab listing, content extraction, interaction, and screenshots via Chrome APIs.",
+  "version": "1.1.0",
+  "description": "Bridge between Pi coding agent and Chrome — enables tab listing, content extraction, interaction, and screenshots via Chrome APIs.",
   "permissions": [
     "tabs",
     "scripting",
     "debugger",
     "nativeMessaging",
-    "alarms"
+    "alarms",
+    "cookies"
   ],
   "host_permissions": [
     "<all_urls>"

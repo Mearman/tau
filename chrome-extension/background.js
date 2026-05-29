@@ -13,6 +13,7 @@ const NATIVE_HOST_NAME = "io.pi.chrome_bridge";
 
 let port = null;
 let reconnectTimer = null;
+let profileMarkerName = null;
 
 // ── Shared helpers ────────────────────────────────────────────────
 
@@ -74,6 +75,12 @@ function deepQuerySelectorScript() {
 
 const handlers = {
 	"ping": async () => ({ ok: true, extensionId: chrome.runtime.id }),
+
+	// Profile identity
+	"get-profile-info": async () => {
+		const markerName = await getOrCreateProfileMarkerName();
+		return { markerName, extensionId: chrome.runtime.id };
+	},
 
 	// Tab operations
 	"list-tabs": listTabs,
@@ -155,7 +162,6 @@ async function listTabs(params) {
 				active: tab.active,
 				pinned: tab.pinned,
 				audible: tab.audible,
-				profile: "current",
 			})),
 	};
 }
@@ -171,7 +177,7 @@ async function newTab(params) {
 	return {
 		id: tab.id, windowId: tab.windowId, index: tab.index,
 		title: tab.title ?? "", url: tab.url ?? (params.url ?? "about:blank"),
-		active: tab.active, profile: "current",
+		active: tab.active,
 	};
 }
 
@@ -200,7 +206,7 @@ async function duplicateTab(params) {
 	return {
 		id: newTab.id, windowId: newTab.windowId, index: newTab.index,
 		title: newTab.title ?? "", url: newTab.url,
-		active: newTab.active, profile: "current",
+		active: newTab.active,
 	};
 }
 
@@ -817,14 +823,57 @@ function connectNative() {
 			const error = chrome.runtime.lastError?.message;
 			console.log("[Pi Bridge] Disconnected:", error ?? "unknown");
 			port = null;
-			reconnectTimer = setTimeout(connectNative, 3000);
+			reconnectTimer = setTimeout(connectNative, 500);
 		});
 
-		port.postMessage({ type: "ping" });
+		// Identify ourselves via a per-profile marker cookie.
+		const markerName = getOrCreateProfileMarkerName();
+		console.log("[Pi Bridge] Profile marker:", markerName);
+		port?.postMessage({
+			type: "identify",
+			markerName,
+			extensionId: chrome.runtime.id,
+		});
+		void writeProfileMarkerCookie(markerName).catch((err) => {
+			console.warn("[Pi Bridge] Failed to write marker cookie:", err);
+		});
 	} catch (err) {
 		console.error("[Pi Bridge] Failed to connect:", err);
 		reconnectTimer = setTimeout(connectNative, 5000);
 	}
+}
+
+/** Create or load a per-profile marker name. */
+function getOrCreateProfileMarkerName() {
+	if (profileMarkerName) return profileMarkerName;
+	const randomPart =
+		globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
+			? globalThis.crypto.randomUUID()
+			: `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+	profileMarkerName = `pi_profile_marker_${randomPart}`;
+	return profileMarkerName;
+}
+
+/** Write a marker cookie into the current profile. */
+async function writeProfileMarkerCookie(markerName) {
+	return await new Promise((resolve, reject) => {
+		chrome.cookies.set(
+			{
+				url: "http://localhost/",
+				name: markerName,
+				value: "1",
+				path: "/",
+			},
+			(cookie) => {
+				const error = chrome.runtime.lastError;
+				if (error) {
+					reject(new Error(error.message));
+					return;
+				}
+				resolve(cookie);
+			}
+		);
+	});
 }
 
 // ── Startup ──────────────────────────────────────────────────────────
@@ -833,7 +882,7 @@ console.log("[Pi Bridge] Service worker starting, extensionId=" + chrome.runtime
 connectNative();
 
 // Keep service worker alive via alarms
-chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
+chrome.alarms.create("keepalive", { periodInMinutes: 0.1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === "keepalive") {
 		if (port) {
