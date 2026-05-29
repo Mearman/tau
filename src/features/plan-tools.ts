@@ -105,7 +105,6 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
 
             // Switch to plan mode
             state.permissionMode = "plan";
-            state.planModeEnabled = true;
             pi.setActiveTools([
                 "read",
                 "bash",
@@ -268,7 +267,6 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             state.planExiting = true;
             const previousMode = state.planPreviousMode ?? "allow";
             state.permissionMode = previousMode;
-            state.planModeEnabled = false;
             pi.setActiveTools(["read", "bash", "edit", "write"]);
 
             // Update status bar
@@ -370,7 +368,7 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             }
 
             // Toggle plan mode
-            if (state.permissionMode === "plan" || state.planModeEnabled) {
+            if (state.permissionMode === "plan") {
                 // Exit plan mode
                 cancelPlanMode(pi, state, ctx);
             } else {
@@ -382,7 +380,6 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
                 state.planSlug = slug;
                 state.planPreviousMode = state.permissionMode;
                 state.permissionMode = "plan";
-                state.planModeEnabled = true;
                 pi.setActiveTools([
                     "read",
                     "bash",
@@ -471,7 +468,6 @@ function cancelPlanMode(
 ): void {
     const previousMode = state.planPreviousMode ?? "allow";
     state.permissionMode = previousMode;
-    state.planModeEnabled = false;
     state.planSlug = undefined;
     state.planPreviousMode = undefined;
     state.planExiting = false;

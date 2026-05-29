@@ -8,7 +8,6 @@
 
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { BackgroundJob, RunningProcess, Task } from "./types.ts";
-import type { TodoItem } from "./plan-utils.ts";
 import type {
     PermissionMode,
     PermissionRule,
@@ -55,16 +54,7 @@ export class TauState {
      */
     commandContextReload?: () => Promise<void>;
 
-    // ── Plan mode (legacy) ────────────────────────────────────────────
-
-    /** @deprecated Legacy plan mode toggle — superseded by permission mode `plan` */
-    planModeEnabled = false;
-    /** @deprecated Legacy execution tracking — superseded by task status updates */
-    planExecutionMode = false;
-    /** @deprecated Legacy todo items — superseded by task tool */
-    planItems: TodoItem[] = [];
-
-    // ── Plan (new) ────────────────────────────────────────────────────
+    // ── Plan ──────────────────────────────────────────────────────
 
     /** Active plan file slug, derived from session ID. Set when plan mode is entered. */
     planSlug: string | undefined;

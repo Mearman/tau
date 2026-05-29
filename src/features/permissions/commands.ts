@@ -222,11 +222,8 @@ function setMode(
             "ls",
             "questionnaire",
         ]);
-        // Also sync legacy plan mode flag
-        state.planModeEnabled = true;
     } else if (prev === "plan") {
         pi.setActiveTools(["read", "bash", "edit", "write"]);
-        state.planModeEnabled = false;
     }
 
     // Update status bar with shortcut hint that fades after 4s
