@@ -151,6 +151,7 @@ export default function (pi: ExtensionAPI) {
                 disableBypass: state.permissionDisableBypass,
                 lastLoadedAt: state.permissionLastLoadedAt,
                 sessionRules: state.permissionSessionRules,
+                askedCommands: state.permissionAskedCommands,
                 planSlug: state.planSlug,
             },
             ctx.cwd
@@ -161,6 +162,7 @@ export default function (pi: ExtensionAPI) {
         state.permissionDisableBypass = permState.disableBypass;
         state.permissionLastLoadedAt = permState.lastLoadedAt;
         state.permissionSessionRules = permState.sessionRules;
+        state.permissionAskedCommands = permState.askedCommands;
 
         // Run the permission pipeline
         const permResult = await checkToolPermission(
@@ -442,6 +444,7 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
         state.permissionDisableBypass = permState.disableBypass;
         state.permissionLastLoadedAt = permState.lastLoadedAt;
         state.permissionSessionRules = permState.sessionRules;
+        state.permissionAskedCommands = permState.askedCommands;
 
         // ── Mode indicator in status bar (with shortcut hint at startup) ──
         if (ctx.hasUI) {

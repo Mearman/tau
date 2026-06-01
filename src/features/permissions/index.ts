@@ -50,9 +50,16 @@ export interface PermissionState {
     disableBypass: boolean;
     lastLoadedAt: number;
     sessionRules: string[];
+    /** Commands that timed out on their ask prompt. On retry these wait indefinitely. */
+    askedCommands: Set<string>;
+    /** Override ask prompt timeout for testing. Undefined = use ASK_PROMPT_TIMEOUT_MS. */
+    askTimeoutMs?: number;
     /** Active plan file slug, if in plan mode. Used to allow writes to plan file. */
     planSlug?: string;
 }
+
+// How long to wait for the user to respond to an ask prompt before timing out.
+const ASK_PROMPT_TIMEOUT_MS = 60_000;
 
 // Re-check settings every 60 seconds
 const SETTINGS_RELOAD_INTERVAL_MS = 60_000;
@@ -156,6 +163,70 @@ async function handleDecisionDestination(
     }
 
     return state;
+}
+
+/**
+ * Prompt the user for an ask-rule decision, with a timeout on first ask.
+ *
+ * If the command has not been asked before, the prompt times out after
+ * ASK_PROMPT_TIMEOUT_MS and returns a rejection. The command is added to
+ * askedCommands so that a retry will wait indefinitely.
+ *
+ * If the command has been asked before (in askedCommands), no timeout —
+ * the model has indicated it really needs this command.
+ *
+ * On any user response (approve or reject), the command is removed from
+ * askedCommands.
+ */
+async function promptAskPermission(
+    ctx: ExtensionContext,
+    question: string,
+    options: { rule?: string },
+    command: string,
+    askedCommands: Set<string>,
+    timeoutMs = ASK_PROMPT_TIMEOUT_MS
+): Promise<{
+    decision: Awaited<ReturnType<typeof promptPermission>>;
+    timedOut: boolean;
+    timeoutMs: number;
+}> {
+    const isRetry = askedCommands.has(command);
+    const effectiveTimeout = timeoutMs ?? ASK_PROMPT_TIMEOUT_MS;
+
+    const promptPromise = promptPermission(ctx, question, options);
+
+    let decision;
+    if (isRetry) {
+        // Retry — wait indefinitely
+        decision = await promptPromise;
+    } else {
+        // First ask — race against timeout
+        decision = await Promise.race([
+            promptPromise,
+            new Promise<Awaited<ReturnType<typeof promptPermission>>>(
+                (resolve) =>
+                    setTimeout(
+                        () => resolve({ approved: false, feedback: "" }),
+                        effectiveTimeout
+                    )
+            ),
+        ]);
+    }
+
+    const timedOut =
+        !isRetry &&
+        !decision.approved &&
+        !decision.feedback &&
+        !decision.destination &&
+        !decision.rule;
+
+    if (timedOut) {
+        askedCommands.add(command);
+    } else {
+        askedCommands.delete(command);
+    }
+
+    return { decision, timedOut, timeoutMs: effectiveTimeout };
 }
 
 export async function checkToolPermission(
@@ -272,11 +343,22 @@ export async function checkToolPermission(
                 };
             }
             if (bashResult?.decision === "ask") {
-                const decision = await promptPermission(
+                const { decision, timedOut } = await promptAskPermission(
                     ctx,
                     `Allow bash command?\n\n${input}\n\nRule requires approval: ${bashResult.rule.rule}`,
-                    { rule: bashResult.rule.rule }
+                    { rule: bashResult.rule.rule },
+                    input,
+                    state.askedCommands,
+                    state.askTimeoutMs
                 );
+                if (timedOut) {
+                    return {
+                        block: true,
+                        reason:
+                            `Permission prompt timed out. ` +
+                            `Command: ${input}\n\nIf this command is essential to continue, retry it and the prompt will wait indefinitely for a response.`,
+                    };
+                }
                 if (!decision.approved) {
                     return {
                         block: true,
@@ -294,11 +376,26 @@ export async function checkToolPermission(
                 normalised
             );
             if (askRule) {
-                const decision = await promptPermission(
+                const {
+                    decision,
+                    timedOut,
+                    timeoutMs: askTimeoutMs,
+                } = await promptAskPermission(
                     ctx,
                     `Allow ${toolName} for ${normalised || "(any)"}?\n\nRule requires approval: ${askRule.rule}`,
-                    { rule: askRule.rule }
+                    { rule: askRule.rule },
+                    normalised,
+                    state.askedCommands,
+                    state.askTimeoutMs
                 );
+                if (timedOut) {
+                    return {
+                        block: true,
+                        reason:
+                            `Permission prompt timed out after ${askTimeoutMs / 1000}s — user did not respond. ` +
+                            `${toolName} for ${normalised || "(any)"}\n\nIf this operation is essential, retry it and the prompt will wait indefinitely.`,
+                    };
+                }
                 if (!decision.approved) {
                     return {
                         block: true,
@@ -328,16 +425,31 @@ export async function checkToolPermission(
         }
     }
 
-    // ── 6. Ask rules → prompt ────────────────────────────────────
+    // ── 6. Ask rules → prompt (with timeout) ────────────────────
 
     if (toolName === "Bash") {
         const bashResult = checkBashPermissions(state.rules, input);
         if (bashResult?.decision === "ask") {
-            const decision = await promptPermission(
+            const {
+                decision,
+                timedOut,
+                timeoutMs: askTimeoutMs,
+            } = await promptAskPermission(
                 ctx,
                 `Allow bash command?\n\n${input}\n\nRule requires approval: ${bashResult.rule.rule}`,
-                { rule: bashResult.rule.rule }
+                { rule: bashResult.rule.rule },
+                input,
+                state.askedCommands,
+                state.askTimeoutMs
             );
+            if (timedOut) {
+                return {
+                    block: true,
+                    reason:
+                        `Permission prompt timed out after ${askTimeoutMs / 1000}s — user did not respond. ` +
+                        `Command: ${input}\n\nIf this command is essential to continue, retry it and the prompt will wait indefinitely for a response.`,
+                };
+            }
             if (!decision.approved) {
                 return {
                     block: true,
@@ -355,11 +467,26 @@ export async function checkToolPermission(
             normalised
         );
         if (askRule) {
-            const decision = await promptPermission(
+            const {
+                decision,
+                timedOut,
+                timeoutMs: askTimeoutMs,
+            } = await promptAskPermission(
                 ctx,
                 `Allow ${toolName} for ${normalised || "(any)"}?\n\nRule requires approval: ${askRule.rule}`,
-                { rule: askRule.rule }
+                { rule: askRule.rule },
+                normalised,
+                state.askedCommands,
+                state.askTimeoutMs
             );
+            if (timedOut) {
+                return {
+                    block: true,
+                    reason:
+                        `Permission prompt timed out after ${askTimeoutMs / 1000}s — user did not respond. ` +
+                        `${toolName} for ${normalised || "(any)"}\n\nIf this operation is essential, retry it and the prompt will wait indefinitely.`,
+                };
+            }
             if (!decision.approved) {
                 return {
                     block: true,
@@ -493,6 +620,7 @@ export async function reloadSettingsIfNeeded(
         disableBypass: loaded.disableBypassPermissions,
         lastLoadedAt: now,
         sessionRules: state.sessionRules, // preserved across reloads
+        askedCommands: state.askedCommands, // preserved across reloads
         planSlug: state.planSlug, // preserved across reloads
     };
 }
@@ -511,6 +639,7 @@ export async function initPermissionState(
         disableBypass: loaded.disableBypassPermissions,
         lastLoadedAt: Date.now(),
         sessionRules: [],
+        askedCommands: new Set(),
     };
 }
 
