@@ -8,6 +8,7 @@
 
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { BackgroundJob, RunningProcess, Task } from "./types.ts";
+import type { GoalState } from "./types.ts";
 import type {
     PermissionMode,
     PermissionRule,
@@ -35,6 +36,11 @@ export class TauState {
      * auto-background on timeout — it runs the command to completion instead.
      */
     nonInteractive = false;
+
+    // ── Goal ────────────────────────────────────────────────────────
+
+    /** The active goal, if any. Set by /goal command, persisted in session entries. */
+    activeGoal: GoalState | undefined;
 
     /** Lifetime counters for terminal jobs (for status bar summary). */
     completedJobCount = 0;
