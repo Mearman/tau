@@ -19,11 +19,11 @@ interface MockPi {
         options: {
             description: string;
             handler: (...args: unknown[]) => Promise<void>;
-        },
+        }
     ) => void;
     on: (
         event: string,
-        handler: (event: unknown, ctx: unknown) => unknown,
+        handler: (event: unknown, ctx: unknown) => unknown
     ) => void;
     appendEntry: (customType: string, data: unknown) => void;
     sendUserMessage: (text: string, options?: unknown) => void;
@@ -60,7 +60,7 @@ function createMockPi(): MockPi {
         sendUserMessage(text, options?) {
             sentMessages.push({ text, options });
         },
-    } as unknown as MockPi;
+    };
 }
 
 function asApi(pi: MockPi): ExtensionAPI {
@@ -94,17 +94,17 @@ function createState(goal?: GoalState): TauState {
 
 function nn<T>(value: T | undefined | null, msg?: string): T {
     assert.ok(value, msg);
-    return value as T;
+    return value;
 }
 
 function getNotificationsCtx(createArgs?: { hasUI?: boolean; idle?: boolean }) {
     const notifications: string[] = [];
     const ctx = createMockCtx(
         createArgs?.hasUI ?? true,
-        createArgs?.idle ?? true,
+        createArgs?.idle ?? true
     );
     (ctx.ui as { notify: (msg: string, level?: string) => void }).notify = (
-        msg: string,
+        msg: string
     ) => {
         notifications.push(msg);
     };
@@ -113,7 +113,7 @@ function getNotificationsCtx(createArgs?: { hasUI?: boolean; idle?: boolean }) {
 
 async function getEventHandler(
     pi: MockPi,
-    event: string,
+    event: string
 ): Promise<(event: unknown, ctx: unknown) => unknown> {
     const handlers = nn(pi.events.get(event), `${event} handlers should exist`);
     assert.ok(handlers.length > 0, `${event} should have at least one handler`);
@@ -173,10 +173,12 @@ void describe("goal feature", () => {
         await cmd.handler("all tests pass", ctx);
 
         assert.ok(state.activeGoal);
-        assert.equal(state.activeGoal!.condition, "all tests pass");
-        assert.equal(state.activeGoal!.iterations, 0);
-        assert.ok(state.activeGoal!.setAt > 0);
-        assert.ok(notifications.some((n) => n.includes("Goal set: all tests pass")));
+        assert.equal(state.activeGoal.condition, "all tests pass");
+        assert.equal(state.activeGoal.iterations, 0);
+        assert.ok(state.activeGoal.setAt > 0);
+        assert.ok(
+            notifications.some((n) => n.includes("Goal set: all tests pass"))
+        );
         assert.ok(pi.sentMessages.length > 0);
         assert.ok(pi.sentMessages[0].text.includes("all tests pass"));
     });
@@ -248,7 +250,9 @@ void describe("goal feature", () => {
 
         await cmd.handler("clear", ctx);
 
-        assert.ok(notifications.some((n) => n.includes("No active goal to clear")));
+        assert.ok(
+            notifications.some((n) => n.includes("No active goal to clear"))
+        );
     });
 
     void it("/goal (no args) shows current goal status", async () => {
@@ -283,7 +287,7 @@ void describe("goal feature", () => {
         const handler = await getEventHandler(pi, "before_agent_start");
         const result = await handler(
             { systemPrompt: "Original prompt" },
-            createMockCtx(),
+            createMockCtx()
         );
 
         assert.ok(result);
@@ -301,7 +305,7 @@ void describe("goal feature", () => {
         const handler = await getEventHandler(pi, "before_agent_start");
         const result = await handler(
             { systemPrompt: "Original prompt" },
-            createMockCtx(),
+            createMockCtx()
         );
 
         assert.equal(result, undefined);
@@ -324,7 +328,7 @@ void describe("goal feature", () => {
         assert.equal(goal.iterations, 3);
 
         const goalEntries = pi.entries.filter(
-            (e: { customType: string }) => e.customType === "tau-goal-state",
+            (e: { customType: string }) => e.customType === "tau-goal-state"
         );
         assert.ok(goalEntries.length > 0);
         const last = goalEntries[goalEntries.length - 1] as unknown as {
@@ -352,7 +356,9 @@ void describe("goal feature", () => {
         mod.registerGoal(asApi(pi), state);
 
         const { ctx, notifications } = getNotificationsCtx();
-        (ctx.sessionManager as unknown as { getEntries: () => unknown[] }).getEntries = () => [
+        (
+            ctx.sessionManager as unknown as { getEntries: () => unknown[] }
+        ).getEntries = () => [
             {
                 type: "custom",
                 customType: "tau-goal-state",
@@ -365,7 +371,7 @@ void describe("goal feature", () => {
         ];
 
         const handler = await getEventHandler(pi, "session_start");
-        await handler({}, ctx as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext);
+        await handler({}, ctx);
 
         const goal = nn(state.activeGoal);
         assert.equal(goal.condition, "resume goal");
