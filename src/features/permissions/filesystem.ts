@@ -11,8 +11,8 @@
 import { resolve, relative, basename } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import type { PermissionRule } from "./types.js";
-import { findMatchingRule } from "./rules.js";
+import type { PermissionRule } from "./types.ts";
+import { findMatchingRule } from "./rules.ts";
 
 // ─── Dangerous file paths (bypass-immune safety checks) ─────────────
 

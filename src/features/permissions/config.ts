@@ -20,7 +20,7 @@ import type {
     RuleSource,
     SettingsFile,
     PermissionUpdateDestination,
-} from "./types.js";
+} from "./types.ts";
 
 // ─── Settings file paths ────────────────────────────────────────────
 

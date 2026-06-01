@@ -9,7 +9,7 @@
  *   dontAsk           — auto-deny anything that would prompt
  */
 
-import type { PermissionMode } from "./types.js";
+import type { PermissionMode } from "./types.ts";
 
 // ─── Mode definitions ────────────────────────────────────────────────
 

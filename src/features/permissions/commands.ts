@@ -13,8 +13,8 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import type { TauState } from "../../state.js";
-import type { PermissionMode } from "./types.js";
+import type { TauState } from "../../state.ts";
+import type { PermissionMode } from "./types.ts";
 import {
     nextMode,
     modeStatusText,
@@ -22,10 +22,10 @@ import {
     PERMISSION_MODES,
     MODE_TITLES,
     MODE_SHORT_TITLES,
-} from "./modes.js";
-import { isBypassAvailable } from "./modes.js";
-import { writeRuleToSettings } from "./config.js";
-import type { PermissionUpdateDestination } from "./types.js";
+} from "./modes.ts";
+import { isBypassAvailable } from "./modes.ts";
+import { writeRuleToSettings } from "./config.ts";
+import type { PermissionUpdateDestination } from "./types.ts";
 
 export function registerPermissions(pi: ExtensionAPI, state: TauState): void {
     // ── /perm command ─────────────────────────────────────────────

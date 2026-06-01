@@ -20,7 +20,7 @@ import type {
 } from "@earendil-works/pi-tui";
 import { Input, matchesKey, Key, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PermissionUpdateDestination } from "./types.js";
+import type { PermissionUpdateDestination } from "./types.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
