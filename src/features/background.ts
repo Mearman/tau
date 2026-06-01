@@ -358,6 +358,11 @@ export function startTimeoutTimer(
     const timeoutMs = explicitTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const timer = setTimeout(() => {
+        // Non-interactive (print/`-p`/non-TTY): there is no agent loop to answer
+        // the auto-background job_decide prompt, so never auto-background or kill
+        // on timeout — let the command run to completion.
+        if (state.nonInteractive) return;
+
         // Guard: only act if this tool call still has a running process.
         // The global currentlyRunningToolCallId may have been overwritten by
         // a concurrent tool call — that doesn't mean *this* call finished.
@@ -1217,6 +1222,10 @@ async function executeTmuxForeground(
             ? params.timeout * 1_000
             : DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => {
+        // Non-interactive (print/`-p`/non-TTY): no agent loop to answer the
+        // auto-background job_decide prompt, so let the command run to
+        // completion instead of backgrounding or killing it on timeout.
+        if (state.nonInteractive) return;
         if (!state.runningProcesses.has(toolCallId)) return;
         if (!isAutoBackgroundAllowed(command)) {
             killTmuxJob(job);

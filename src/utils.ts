@@ -261,6 +261,21 @@ export function detectBlockedSleep(command: string): string | null {
     return first;
 }
 
+/**
+ * Whether pi is running non-interactively. Mirrors pi's own mode decision
+ * (`parsed.print || !stdinIsTTY`): explicit `-p`/`--print`, or stdin not a TTY
+ * (piped / spawned by another process). When true there is no interactive agent
+ * loop to answer the bash tool's auto-background `job_decide` prompt, so the
+ * tool must run commands to completion instead of backgrounding on timeout.
+ */
+export function detectNonInteractive(
+    argv: readonly string[],
+    stdinIsTTY: boolean
+): boolean {
+    if (!stdinIsTTY) return true;
+    return argv.includes("-p") || argv.includes("--print");
+}
+
 // ─── DnD check ──────────────────────────────────────────────────────
 
 /** Check macOS system Do Not Disturb / Focus mode using notifyutil. */

@@ -28,6 +28,14 @@ export class TauState {
     /** Whether the tmux-unavailable warning has been shown this session. */
     tmuxWarningShown = false;
 
+    /**
+     * Whether pi is running non-interactively (print/`-p` mode, or stdin is not
+     * a TTY). When true there is no interactive agent loop to answer the
+     * auto-background `job_decide` prompt, so the bash tool must NOT
+     * auto-background on timeout — it runs the command to completion instead.
+     */
+    nonInteractive = false;
+
     /** Lifetime counters for terminal jobs (for status bar summary). */
     completedJobCount = 0;
     failedJobCount = 0;

@@ -17,7 +17,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { TauState } from "./state.ts";
-import { cleanupStaleLogs } from "./utils.ts";
+import { cleanupStaleLogs, detectNonInteractive } from "./utils.ts";
 import { isSafeCommand } from "./plan-utils.ts";
 import {
     initPermissionState,
@@ -315,6 +315,16 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
                 "warning"
             );
         }
+
+        // ── Print/non-interactive detection ──────────────────────────
+        // Mirror pi's own mode decision (print || !stdin.isTTY). When
+        // non-interactive there is no agent loop to answer the bash tool's
+        // auto-background job_decide prompt, so the tool must run commands to
+        // completion instead of backgrounding on timeout.
+        state.nonInteractive = detectNonInteractive(
+            process.argv,
+            Boolean(process.stdin.isTTY)
+        );
 
         // Clean up run directories and tmux sessions from dead pi processes
         if (state.tmuxAvailable) {

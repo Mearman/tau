@@ -7,7 +7,32 @@ import {
     looksLikePrompt,
     truncateNotificationBody,
     lastAssistantText,
+    detectNonInteractive,
 } from "../utils.ts";
+
+void describe("detectNonInteractive", () => {
+    void it("is true when -p is in argv (explicit print mode)", () => {
+        assert.equal(
+            detectNonInteractive(["node", "pi", "-p", "do x"], true),
+            true
+        );
+    });
+
+    void it("is true when --print is in argv", () => {
+        assert.equal(
+            detectNonInteractive(["node", "pi", "--print"], true),
+            true
+        );
+    });
+
+    void it("is true when stdin is not a TTY (piped/spawned)", () => {
+        assert.equal(detectNonInteractive(["node", "pi"], false), true);
+    });
+
+    void it("is false for an interactive TTY with no print flag", () => {
+        assert.equal(detectNonInteractive(["node", "pi", "chat"], true), false);
+    });
+});
 
 void describe("formatDuration", () => {
     void it("formats seconds under a minute", () => {

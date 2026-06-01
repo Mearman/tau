@@ -544,6 +544,44 @@ void describe("startTimeoutTimer", () => {
         clearTimeout(timer);
     });
 
+    void it("does NOT auto-background when non-interactive (print mode)", async () => {
+        const state = new TauState();
+        state.nonInteractive = true;
+        state.currentlyRunningToolCallId = "tc-noninteractive-1";
+        let triggered = false;
+
+        // Register a running process so the guard passes; only nonInteractive
+        // should prevent the background trigger.
+        state.runningProcesses.set("tc-noninteractive-1", {
+            toolCallId: "tc-noninteractive-1",
+            proc: { pid: -1 } as never,
+            command: "npm test",
+            logPath: "/tmp/test.log",
+            triggerBackground: () => {
+                triggered = true;
+            },
+        });
+
+        const timer = startTimeoutTimer(
+            () => {
+                triggered = true;
+            },
+            "npm test",
+            state,
+            "tc-noninteractive-1",
+            50
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        assert.equal(
+            triggered,
+            false,
+            "must not auto-background when non-interactive — no agent loop to answer job_decide"
+        );
+        clearTimeout(timer);
+    });
+
     void it("triggers background even when toolCallId was overwritten by a concurrent call", async () => {
         const state = new TauState();
         state.currentlyRunningToolCallId = "tc-concurrent-1";
