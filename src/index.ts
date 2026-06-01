@@ -6,7 +6,7 @@
  * Tools: bash (overridden), bash_bg, jobs, job_decide, task,
  *        enter_plan_mode, exit_plan_mode
  * Commands: /bg, /fg, /jobs, /tasks, /tools, /plan, /perm, /bookmark,
- *           /unbookmark, /context, /footer, /notifications, /preset,
+ *           /unbookmark, /context, /footer, /goal, /notifications, /preset,
  *           /session-name, /summarize
  * Shortcuts: Ctrl+B (background/resume), Ctrl+J / Shift+Down (tasks),
  *            Ctrl+X (kill), Ctrl+Alt+P (plan mode), Ctrl+Shift+U (preset cycle),
@@ -61,6 +61,7 @@ import { registerCustomFooter } from "./features/custom-footer.ts";
 import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
 // Handoff disabled — import { registerHandoff } from "./features/handoff.ts";
+import { registerGoal } from "./features/goal.ts";
 import { registerPreset } from "./features/preset.ts";
 import { registerLoop } from "./features/loop.ts";
 import { registerSessionName } from "./features/session-name.ts";
@@ -107,6 +108,7 @@ export default function (pi: ExtensionAPI) {
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
     registerPlanTools(pi, state);
+    registerGoal(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
