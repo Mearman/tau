@@ -18,6 +18,7 @@ function makeState(overrides: Partial<PermissionState> = {}): PermissionState {
         disableBypass: false,
         lastLoadedAt: Date.now(),
         sessionRules: [],
+        askedCommands: new Set(),
         ...overrides,
     };
 }
