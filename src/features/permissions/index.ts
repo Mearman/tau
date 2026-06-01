@@ -18,27 +18,27 @@ import type {
     ToolCallEvent,
     ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import type { PermissionMode, PermissionRule } from "./types.js";
-import { toClaudeToolName } from "./types.js";
+import type { PermissionMode, PermissionRule } from "./types.ts";
+import { toClaudeToolName } from "./types.ts";
 import {
     loadAllPermissions,
     getToolInput,
     normaliseToolInput,
     writeRuleToSettings,
-} from "./config.js";
-import { findMatchingRule } from "./rules.js";
+} from "./config.ts";
+import { findMatchingRule } from "./rules.ts";
 import {
     checkBashPermissions,
     isSafePlanCommand,
     isAcceptEditsCommand,
-} from "./bash.js";
+} from "./bash.ts";
 import {
     checkReadPermission,
     checkWritePermission,
     isDangerousFilePath,
-} from "./filesystem.js";
-import { promptPermission } from "./prompt.js";
-import { isPlanFilePath } from "../plan-file.js";
+} from "./filesystem.ts";
+import { promptPermission } from "./prompt.ts";
+import { isPlanFilePath } from "../plan-file.ts";
 import { basename, resolve } from "node:path";
 
 // ─── Permission state ────────────────────────────────────────────────
@@ -114,7 +114,7 @@ async function handleDecisionDestination(
     decision: {
         approved: boolean;
         feedback: string;
-        destination?: import("./types.js").PermissionUpdateDestination;
+        destination?: import("./types.ts").PermissionUpdateDestination;
         rule?: string;
     },
     state: PermissionState,
@@ -261,17 +261,52 @@ export async function checkToolPermission(
     }
 
     // bypassPermissions: skip default prompts (safety checks already handled above)
+    // but ask rules still require explicit approval even in allow mode.
     if (state.mode === "allow") {
-        // If we got here, no deny rule matched and safety checks passed
-        // Auto-approve everything else
         if (toolName === "Bash") {
             const bashResult = checkBashPermissions(state.rules, input);
             if (bashResult?.decision === "deny") {
-                // Already handled above, but defensive check
                 return {
                     block: true,
                     reason: `Permission denied by rule: ${bashResult.rule.rule}`,
                 };
+            }
+            if (bashResult?.decision === "ask") {
+                const decision = await promptPermission(
+                    ctx,
+                    `Allow bash command?\n\n${input}\n\nRule requires approval: ${bashResult.rule.rule}`,
+                    { rule: bashResult.rule.rule }
+                );
+                if (!decision.approved) {
+                    return {
+                        block: true,
+                        reason: `Bash command rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
+                    };
+                }
+                await handleDecisionDestination(decision, state, cwd);
+                return { block: false };
+            }
+        } else {
+            const askRule = findMatchingRule(
+                state.rules,
+                "ask",
+                toolName,
+                normalised
+            );
+            if (askRule) {
+                const decision = await promptPermission(
+                    ctx,
+                    `Allow ${toolName} for ${normalised || "(any)"}?\n\nRule requires approval: ${askRule.rule}`,
+                    { rule: askRule.rule }
+                );
+                if (!decision.approved) {
+                    return {
+                        block: true,
+                        reason: `${toolName} rejected.${decision.feedback ? " Feedback: " + decision.feedback : ""}`,
+                    };
+                }
+                await handleDecisionDestination(decision, state, cwd);
+                return { block: false };
             }
         }
         return { block: false };
@@ -481,8 +516,8 @@ export async function initPermissionState(
 
 // ─── Re-exports ──────────────────────────────────────────────────────
 
-export { type PermissionMode, type PermissionRule } from "./types.js";
-export { toClaudeToolName, fromClaudeToolName } from "./types.js";
+export { type PermissionMode, type PermissionRule } from "./types.ts";
+export { toClaudeToolName, fromClaudeToolName } from "./types.ts";
 export {
     nextMode,
     modeStatusText,
@@ -490,7 +525,7 @@ export {
     PERMISSION_MODES,
     MODE_TITLES,
     MODE_SHORT_TITLES,
-} from "./modes.js";
-export { splitCommand, stripSafeWrappers, isSafePlanCommand } from "./bash.js";
-export { isDangerousFilePath } from "./filesystem.js";
-export { promptPermission } from "./prompt.js";
+} from "./modes.ts";
+export { splitCommand, stripSafeWrappers, isSafePlanCommand } from "./bash.ts";
+export { isDangerousFilePath } from "./filesystem.ts";
+export { promptPermission } from "./prompt.ts";
