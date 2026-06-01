@@ -86,3 +86,11 @@ export interface TaskDetails {
     nextId: number;
     error?: string;
 }
+
+// ─── Goal ──────────────────────────────────────────────────────────
+
+export interface GoalState {
+    condition: string;
+    setAt: number;
+    iterations: number;
+}
