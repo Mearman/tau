@@ -15,7 +15,7 @@
  *   enforcement prevents "ls:*" from matching "lsof".
  */
 
-import type { ParsedRule, PermissionRule } from "./types.js";
+import type { ParsedRule, PermissionRule } from "./types.ts";
 
 // ─── Rule parsing ─────────────────────────────────────────────────────
 
@@ -38,15 +38,17 @@ export function parseRule(rule: string): ParsedRule {
 /**
  * Match a Claude Code glob pattern against an input string.
  *
- * Only * is a wildcard (matches any characters including /).
- * All other characters are treated as literals.
+ * * is a wildcard (matches any characters including /).
+ * Other regex metacharacters are escaped except . which is
+ * preserved so that patterns like "git commit.*--no-verify" work
+ * as expected. No end anchor — patterns match a prefix of the input.
  */
 function matchGlob(pattern: string, input: string): boolean {
     const regexStr = pattern
-        .replace(/[.+^${}()|[\]\\]/g, (char) => "\\" + char)
+        .replace(/[+^${}()|[\]\\]/g, (char) => "\\" + char)
         .replace(/\*/g, ".*");
 
-    const regex = new RegExp("^" + regexStr + "$");
+    const regex = new RegExp("^" + regexStr);
     return regex.test(input);
 }
 

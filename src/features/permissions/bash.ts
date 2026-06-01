@@ -12,8 +12,8 @@
  * - Uses shell-quote-compatible splitting for compound commands
  */
 
-import type { PermissionRule } from "./types.js";
-import { parseRule } from "./rules.js";
+import type { PermissionRule } from "./types.ts";
+import { parseRule } from "./rules.ts";
 
 // ─── Subcommand splitting ───────────────────────────────────────────
 
@@ -484,12 +484,16 @@ function ruleMatchesPattern(pattern: string, input: string): boolean {
         return false;
     }
 
-    // Glob/wildcard pattern
+    // Wildcard pattern — * matches any characters.
+    // Treats the pattern as a partial regex where * → .* and
+    // other regex metacharacters are escaped. No end anchor so
+    // "git commit.*--no-verify" matches
+    // "git commit --no-verify -m \"test\"".
     if (pattern.includes("*")) {
         const regexStr = pattern
-            .replace(/[.+^${}()|[\]\\]/g, (c) => "\\" + c)
+            .replace(/[+^${}()|[\]\\]/g, (c) => "\\" + c)
             .replace(/\*/g, ".*");
-        return new RegExp("^" + regexStr + "$").test(input);
+        return new RegExp("^" + regexStr).test(input);
     }
 
     // Exact match
