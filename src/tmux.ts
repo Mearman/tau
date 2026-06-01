@@ -151,12 +151,10 @@ export function createBashScript(
         `#!/usr/bin/env bash
 __output_file=${shellQuote(outputFile)}
 __exit_code_file=${shellQuote(exitCodeFile)}
-: > "$__output_file"
 (
 ${command}
-) 2>&1 | tee -a "$__output_file"
-__rc=\${PIPESTATUS[0]}
-printf '%s\\n' "$__rc" > "$__exit_code_file"
+) >> "$__output_file" 2>&1
+printf '%s\\n' "$?" > "$__exit_code_file"
 `,
         { mode: 0o755 }
     );
@@ -216,8 +214,9 @@ export function captureOutput(
     lines: number,
     outputFile?: string
 ): string {
-    // Prefer the tee'd output file — it has the exact content without tmux framing.
-    // Fall back to tmux capture-pane when the file is missing or empty.
+    // Prefer the output file written by the wrapper script — it has the exact
+    // content without tmux framing. Fall back to tmux capture-pane when the file
+    // is missing or empty.
     if (outputFile && existsSync(outputFile)) {
         const content = readFileSync(outputFile, "utf-8");
         if (content.length > 0) return content;
