@@ -378,10 +378,40 @@ export async function executeWorkflowScript(
                 });
             },
         },
-        // Block non-deterministic globals
-        setTimeout: undefined,
-        setInterval: undefined,
-        setImmediate: undefined,
+        // Block non-deterministic and dangerous globals.
+        // Setting undefined doesn't prevent access — the VM falls through
+        // to the real global. Instead, provide functions that throw.
+        setTimeout: () => {
+            throw new Error("setTimeout is unavailable in workflow scripts");
+        },
+        setInterval: () => {
+            throw new Error("setInterval is unavailable in workflow scripts");
+        },
+        setImmediate: () => {
+            throw new Error("setImmediate is unavailable in workflow scripts");
+        },
+        Date: class {
+            constructor() {
+                throw new Error(
+                    "Date is unavailable in workflow scripts (breaks resume)"
+                );
+            }
+            static now() {
+                throw new Error(
+                    "Date.now() is unavailable in workflow scripts (breaks resume)"
+                );
+            }
+        },
+        Math: new Proxy(Math, {
+            get(target, prop) {
+                if (prop === "random") {
+                    throw new Error(
+                        "Math.random() is unavailable in workflow scripts (breaks resume)"
+                    );
+                }
+                return target[prop as keyof Math];
+            },
+        }),
         process: undefined,
         require: undefined,
         globalThis: undefined,
