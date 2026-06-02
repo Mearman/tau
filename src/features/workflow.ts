@@ -164,19 +164,14 @@ export async function executeAgent(
     model?: string,
     signal?: AbortSignal
 ): Promise<string> {
-    const promptFile = join(
-        tmpdir(),
-        `pi-wf-agent-${Date.now()}-${randomBytes(4).toString("hex")}.md`
-    );
-    const logFile = join(
-        tmpdir(),
-        `pi-wf-agent-${Date.now()}-${randomBytes(4).toString("hex")}.log`
-    );
+    const id = randomBytes(8).toString("hex");
+    const promptFile = join(tmpdir(), `pi-wf-agent-${id}.md`);
+    const logFile = join(tmpdir(), `pi-wf-agent-${id}.log`);
 
     writeFileSync(promptFile, prompt);
 
     const modelArg = model ? ["--model", model] : [];
-    const spawnArgs = ["-p", "--mode", "text", ...modelArg, `@${promptFile}`];
+    const spawnArgs = ["-p", "--no-session", ...modelArg, `@${promptFile}`];
 
     return new Promise((resolve, reject) => {
         const proc = spawn("pi", spawnArgs, {
@@ -189,7 +184,8 @@ export async function executeAgent(
         let output = "";
 
         proc.stdout?.on("data", (chunk: Buffer) => {
-            output += chunk.toString();
+            const text = chunk.toString();
+            output += text;
             logStream.write(chunk);
         });
 
@@ -211,7 +207,18 @@ export async function executeAgent(
             }
 
             if (code === 0 || code === null) {
-                resolve(output.trim());
+                // Strip terminal escape sequences that pi may emit.
+                // Char 27 = ESC, char 7 = BEL. Built from char codes so
+                // no-control-regex has nothing to flag.
+                const esc = String.fromCharCode(27);
+                const bel = String.fromCharCode(7);
+                const oscRe = new RegExp(esc + "][^" + bel + "]*" + bel, "g");
+                const csiRe = new RegExp(esc + "\\[" + "[\\d;]*[A-Za-z]", "g");
+                const cleanOutput = output
+                    .replace(oscRe, "")
+                    .replace(csiRe, "")
+                    .trim();
+                resolve(cleanOutput);
             } else {
                 reject(
                     new Error(

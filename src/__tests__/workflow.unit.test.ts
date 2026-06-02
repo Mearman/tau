@@ -267,3 +267,22 @@ void describe("workflow registration", () => {
         assert.ok(events.has("session_start"));
     });
 });
+
+// ─── resolveWorkflow tests ───────────────────────────────────────────
+
+void describe("workflow resolveWorkflow", () => {
+    void it("returns undefined for nonexistent workflow", async () => {
+        const { resolveWorkflow } = await import("../features/workflow.ts");
+        assert.equal(resolveWorkflow("nonexistent", "/tmp"), undefined);
+    });
+});
+
+// ─── listWorkflows tests ─────────────────────────────────────────────
+
+void describe("workflow listWorkflows", () => {
+    void it("returns empty array when directory does not exist", async () => {
+        const { listWorkflows } = await import("../features/workflow.ts");
+        const workflows = listWorkflows("/tmp/nonexistent-dir-xyz");
+        assert.deepEqual(workflows, []);
+    });
+});
