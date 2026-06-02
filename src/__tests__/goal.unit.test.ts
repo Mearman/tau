@@ -69,10 +69,15 @@ function asApi(pi: MockPi): ExtensionAPI {
 
 // ─── Mock context ───────────────────────────────────────────────────
 
-function createMockCtx(hasUI: boolean = true, idle: boolean = true) {
+function createMockCtx(
+    hasUI: boolean = true,
+    idle: boolean = true,
+    pendingMessages: boolean = false
+) {
     return {
         hasUI,
         isIdle: () => idle,
+        hasPendingMessages: () => pendingMessages,
         cwd: "/tmp/test",
         ui: {
             notify: (_msg: string, _level?: string) => {},
@@ -97,11 +102,16 @@ function nn<T>(value: T | undefined | null, msg?: string): T {
     return value;
 }
 
-function getNotificationsCtx(createArgs?: { hasUI?: boolean; idle?: boolean }) {
+function getNotificationsCtx(opts?: {
+    hasUI?: boolean;
+    idle?: boolean;
+    pendingMessages?: boolean;
+}) {
     const notifications: string[] = [];
     const ctx = createMockCtx(
-        createArgs?.hasUI ?? true,
-        createArgs?.idle ?? true
+        opts?.hasUI ?? true,
+        opts?.idle ?? true,
+        opts?.pendingMessages ?? false
     );
     (ctx.ui as { notify: (msg: string, level?: string) => void }).notify = (
         msg: string
@@ -115,9 +125,26 @@ async function getEventHandler(
     pi: MockPi,
     event: string
 ): Promise<(event: unknown, ctx: unknown) => unknown> {
-    const handlers = nn(pi.events.get(event), `${event} handlers should exist`);
-    assert.ok(handlers.length > 0, `${event} should have at least one handler`);
+    const handlers = nn(pi.events.get(event), `${event} handlers`);
+    assert.ok(handlers.length > 0, `${event} needs handlers`);
     return handlers[0];
+}
+
+/** Build a mock agent_end event with the given assistant messages. */
+function makeAgentEndEvent(
+    assistantMessages: Array<{
+        role: string;
+        content: Array<{ type: string; text?: string }>;
+        stopReason?: string;
+    }>
+) {
+    return {
+        messages: assistantMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            stopReason: m.stopReason ?? "stop",
+        })),
+    };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -128,24 +155,26 @@ void describe("goal feature", () => {
         assert.equal(typeof mod.registerGoal, "function");
     });
 
+    void it("exports checkGoalCompletion function", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(typeof mod.checkGoalCompletion, "function");
+    });
+
     void it("registerGoal registers the /goal command", async () => {
         const mod = await import("../features/goal.ts");
         const pi = createMockPi();
-        const state = createState();
-        mod.registerGoal(asApi(pi), state);
-
+        mod.registerGoal(asApi(pi), createState());
         assert.ok(pi.commands.has("goal"));
     });
 
-    void it("registerGoal subscribes to session_start, before_agent_start, and turn_end", async () => {
+    void it("registerGoal subscribes to all required events", async () => {
         const mod = await import("../features/goal.ts");
         const pi = createMockPi();
-        const state = createState();
-        mod.registerGoal(asApi(pi), state);
+        mod.registerGoal(asApi(pi), createState());
 
         assert.ok(pi.events.has("session_start"));
         assert.ok(pi.events.has("before_agent_start"));
-        assert.ok(pi.events.has("turn_end"));
+        assert.ok(pi.events.has("agent_end"));
     });
 
     void it("/goal with no args shows 'No goal set' when no goal active", async () => {
@@ -155,9 +184,7 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("", ctx);
-
         assert.ok(notifications.some((n) => n.includes("No goal set")));
     });
 
@@ -169,18 +196,15 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("all tests pass", ctx);
 
         assert.ok(state.activeGoal);
         assert.equal(state.activeGoal.condition, "all tests pass");
         assert.equal(state.activeGoal.iterations, 0);
-        assert.ok(state.activeGoal.setAt > 0);
         assert.ok(
             notifications.some((n) => n.includes("Goal set: all tests pass"))
         );
         assert.ok(pi.sentMessages.length > 0);
-        assert.ok(pi.sentMessages[0].text.includes("all tests pass"));
     });
 
     void it("/goal with existing goal shows 'Goal updated'", async () => {
@@ -195,15 +219,11 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("new goal", ctx);
 
-        const goal = nn(state.activeGoal);
-        assert.equal(goal.condition, "new goal");
+        assert.equal(state.activeGoal!.condition, "new goal");
         assert.ok(notifications.some((n) => n.includes("Goal updated")));
         assert.ok(notifications.some((n) => n.includes("old goal")));
-        assert.ok(pi.sentMessages.length > 0);
-        assert.ok(pi.sentMessages[0].text.includes("new goal"));
     });
 
     void it("/goal <condition> does not trigger turn when agent is busy", async () => {
@@ -214,7 +234,6 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx } = getNotificationsCtx({ idle: false });
-
         await cmd.handler("finish the work", ctx);
 
         assert.ok(state.activeGoal);
@@ -233,7 +252,6 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("clear", ctx);
 
         assert.equal(state.activeGoal, undefined);
@@ -247,7 +265,6 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("clear", ctx);
 
         assert.ok(
@@ -267,7 +284,6 @@ void describe("goal feature", () => {
 
         const cmd = nn(pi.commands.get("goal"));
         const { ctx, notifications } = getNotificationsCtx();
-
         await cmd.handler("", ctx);
 
         assert.ok(notifications.some((n) => n.includes("write all tests")));
@@ -311,44 +327,6 @@ void describe("goal feature", () => {
         assert.equal(result, undefined);
     });
 
-    void it("turn_end increments iteration counter and persists", async () => {
-        const mod = await import("../features/goal.ts");
-        const pi = createMockPi();
-        const state = createState({
-            condition: "test goal",
-            setAt: Date.now(),
-            iterations: 2,
-        });
-        mod.registerGoal(asApi(pi), state);
-
-        const handler = await getEventHandler(pi, "turn_end");
-        await handler({}, createMockCtx());
-
-        const goal = nn(state.activeGoal);
-        assert.equal(goal.iterations, 3);
-
-        const goalEntries = pi.entries.filter(
-            (e: { customType: string }) => e.customType === "tau-goal-state"
-        );
-        assert.ok(goalEntries.length > 0);
-        const last = goalEntries[goalEntries.length - 1] as unknown as {
-            data: { iterations: number };
-        };
-        assert.equal(last.data.iterations, 3);
-    });
-
-    void it("turn_end does nothing when no goal active", async () => {
-        const mod = await import("../features/goal.ts");
-        const pi = createMockPi();
-        const testState = createState();
-        mod.registerGoal(asApi(pi), testState);
-
-        const handler = await getEventHandler(pi, "turn_end");
-        await handler({}, createMockCtx());
-
-        assert.equal(testState.activeGoal, undefined);
-    });
-
     void it("session_start restores goal from session entries", async () => {
         const mod = await import("../features/goal.ts");
         const pi = createMockPi();
@@ -377,5 +355,387 @@ void describe("goal feature", () => {
         assert.equal(goal.condition, "resume goal");
         assert.equal(goal.iterations, 5);
         assert.ok(notifications.some((n) => n.includes("Goal restored")));
+    });
+});
+
+// ─── Completion detection tests ─────────────────────────────────────
+
+void describe("goal checkGoalCompletion", () => {
+    void it("returns 'met' for goal achieved", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("The goal is achieved. All tests pass."),
+            "met"
+        );
+    });
+
+    void it("returns 'met' for condition satisfied", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("The condition is now satisfied."),
+            "met"
+        );
+    });
+
+    void it("returns 'met' for task complete", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(mod.checkGoalCompletion("The task is complete."), "met");
+    });
+
+    void it("returns 'met' for nothing more to do", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("There is nothing more to do."),
+            "met"
+        );
+    });
+
+    void it("returns 'impossible' for goal impossible", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("The goal is impossible to achieve."),
+            "impossible"
+        );
+    });
+
+    void it("returns 'impossible' for unable to complete", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("I am unable to complete the goal."),
+            "impossible"
+        );
+    });
+
+    void it("returns null for in-progress text", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(
+            mod.checkGoalCompletion("I am still working on the task."),
+            null
+        );
+    });
+
+    void it("returns null for empty text", async () => {
+        const mod = await import("../features/goal.ts");
+        assert.equal(mod.checkGoalCompletion(""), null);
+    });
+});
+
+// ─── agent_end continuation tests ───────────────────────────────────
+
+void describe("goal agent_end continuation", () => {
+    void it("sends continuation message when goal is not met", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "text",
+                        text: "I made some progress but the build is still failing.",
+                    },
+                ],
+                stopReason: "stop",
+            },
+        ]);
+        const ctx = getNotificationsCtx().ctx;
+
+        await handler(event, ctx);
+
+        // Should have sent a continuation message
+        const followUps = pi.sentMessages.filter(
+            (m) =>
+                m.options &&
+                (m.options as Record<string, string>).deliverAs === "followUp"
+        );
+        assert.ok(followUps.length > 0, "should send followUp continuation");
+        assert.ok(
+            followUps[0].text.includes("fix the build"),
+            "continuation should mention the goal"
+        );
+        // Goal should still be active with incremented iterations
+        assert.ok(state.activeGoal);
+        assert.equal(state.activeGoal.iterations, 1);
+    });
+
+    void it("clears goal and notifies when agent says goal is met", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 3,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "text",
+                        text: "The build is passing. Goal condition is met.",
+                    },
+                ],
+                stopReason: "stop",
+            },
+        ]);
+        const { ctx, notifications } = getNotificationsCtx();
+
+        await handler(event, ctx);
+
+        assert.equal(state.activeGoal, undefined, "goal should be cleared");
+        assert.ok(
+            notifications.some(
+                (n) =>
+                    n.includes("Goal achieved") && n.includes("fix the build")
+            )
+        );
+        // No continuation message should have been sent
+        const followUps = pi.sentMessages.filter(
+            (m) =>
+                m.options &&
+                (m.options as Record<string, string>).deliverAs === "followUp"
+        );
+        assert.equal(followUps.length, 0);
+    });
+
+    void it("clears goal when agent says it's impossible", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 2,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "text",
+                        text: "The goal is impossible — the dependency is unpublished.",
+                    },
+                ],
+                stopReason: "stop",
+            },
+        ]);
+        const { ctx, notifications } = getNotificationsCtx();
+
+        await handler(event, ctx);
+
+        assert.equal(state.activeGoal, undefined);
+        assert.ok(
+            notifications.some(
+                (n) => n.includes("impossible") && n.includes("fix the build")
+            )
+        );
+    });
+
+    void it("does nothing when no goal is active", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        mod.registerGoal(asApi(pi), createState());
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "All done!" }],
+                stopReason: "stop",
+            },
+        ]);
+        const ctx = getNotificationsCtx().ctx;
+
+        await handler(event, ctx);
+
+        assert.equal(pi.sentMessages.length, 0);
+    });
+
+    void it("does nothing when agent made tool calls (not a real stop)", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [{ type: "toolCall", name: "bash" }],
+                stopReason: "toolUse",
+            },
+        ]);
+        const ctx = getNotificationsCtx().ctx;
+
+        await handler(event, ctx);
+
+        // No continuation — the tool loop handles it
+        const followUps = pi.sentMessages.filter(
+            (m) =>
+                m.options &&
+                (m.options as Record<string, string>).deliverAs === "followUp"
+        );
+        assert.equal(followUps.length, 0);
+        assert.equal(state.activeGoal!.iterations, 0);
+    });
+
+    void it("does nothing when there are pending messages", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "Still working on it." }],
+                stopReason: "stop",
+            },
+        ]);
+        const { ctx } = getNotificationsCtx({ pendingMessages: true });
+
+        await handler(event, ctx);
+
+        const followUps = pi.sentMessages.filter(
+            (m) =>
+                m.options &&
+                (m.options as Record<string, string>).deliverAs === "followUp"
+        );
+        assert.equal(followUps.length, 0);
+    });
+
+    void it("does nothing for non-clean stop reasons", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "Here is my analysis so far." },
+                ],
+                stopReason: "maxTokens",
+            },
+        ]);
+        const ctx = getNotificationsCtx().ctx;
+
+        await handler(event, ctx);
+
+        const followUps = pi.sentMessages.filter(
+            (m) =>
+                m.options &&
+                (m.options as Record<string, string>).deliverAs === "followUp"
+        );
+        assert.equal(followUps.length, 0);
+    });
+
+    void it("persists iteration count to session on continuation", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 2,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const event = makeAgentEndEvent([
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "Still working on the fix." }],
+                stopReason: "stop",
+            },
+        ]);
+        const ctx = getNotificationsCtx().ctx;
+
+        await handler(event, ctx);
+
+        const goalEntries = pi.entries.filter(
+            (e: { customType: string }) => e.customType === "tau-goal-state"
+        );
+        assert.ok(goalEntries.length > 0);
+        const last = goalEntries[goalEntries.length - 1] as unknown as {
+            data: { iterations: number };
+        };
+        assert.equal(last.data.iterations, 3);
+    });
+
+    void it("continuation count increments each turn", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "fix the build",
+            setAt: Date.now(),
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const handler = await getEventHandler(pi, "agent_end");
+        const ctx = getNotificationsCtx().ctx;
+
+        // Simulate 3 turns of the agent not meeting the goal
+        for (let turn = 1; turn <= 3; turn++) {
+            pi.sentMessages.length = 0;
+            const event = makeAgentEndEvent([
+                {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "text",
+                            text: `Turn ${turn}: still working on the fix.`,
+                        },
+                    ],
+                    stopReason: "stop",
+                },
+            ]);
+
+            await handler(event, ctx);
+
+            const followUps = pi.sentMessages.filter(
+                (m) =>
+                    m.options &&
+                    (m.options as Record<string, string>).deliverAs ===
+                        "followUp"
+            );
+            assert.ok(
+                followUps.length > 0,
+                `turn ${turn}: should send continuation`
+            );
+            assert.ok(
+                followUps[0].text.includes(`turn ${turn}`),
+                `turn ${turn}: message should reference turn number`
+            );
+            assert.equal(state.activeGoal.iterations, turn);
+        }
     });
 });

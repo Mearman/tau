@@ -8,8 +8,14 @@
  *   /goal              — Show current goal status
  *
  * The goal is persisted in session entries so it survives /reload.
- * On each turn_end the agent evaluates whether the goal condition is met
- * via a system directive injected by before_agent_start.
+ *
+ * Continuation mechanism (Stop hook equivalent):
+ *   Claude Code uses a Stop hook with preventContinuation to physically block
+ *   the agent from stopping. pi doesn't expose Stop hooks, so we approximate
+ *   the same behaviour by listening on agent_end: if the goal is not yet met,
+ *   we inject a follow-up user message that forces the agent to keep working.
+ *   This creates a hard loop — the agent cannot stop until the goal condition
+ *   is satisfied or the user runs /goal clear.
  */
 
 import type {
@@ -18,6 +24,40 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { GoalState } from "../types.ts";
+
+// ─── Completion detection ───────────────────────────────────────────
+
+/**
+ * Patterns the agent uses to signal it believes the goal is met.
+ * Scanned case-insensitively against the last assistant message text.
+ */
+const DONE_PATTERNS = [
+    /\bgoal\s+(?:is\s+)?(?:achieved|met|complete|done|satisfied|finished)\b/i,
+    /\bcondition\s+(?:is\s+)?(?:now\s+)?(?:met|satisfied|fulfilled|complete)\b/i,
+    /\btask\s+(?:is\s+)?(?:complete|done|finished)\b/i,
+    /\ball\s+(?:steps?|tasks?|work)\s+(?:are\s+)?(?:complete|done|finished)\b/i,
+    /\bworking\s+as\s+(?:expected|intended|designed)\b/i,
+    /\bnothing\s+(?:more|else)\s+to\s+do\b/i,
+];
+
+/**
+ * Patterns that signal the agent believes the goal is impossible.
+ */
+const IMPOSSIBLE_PATTERNS = [
+    /\bgoal\s+(?:is\s+)?(?:impossible|unachievable|cannot\s+be\s+met)\b/i,
+    /\bcondition\s+(?:is\s+)?(?:impossible|unachievable|cannot\s+be\s+satisfied)\b/i,
+    /\bunable\s+to\s+(?:complete|achieve|satisfy|meet)\s+(?:the\s+)?goal\b/i,
+];
+
+export function checkGoalCompletion(text: string): "met" | "impossible" | null {
+    for (const pattern of DONE_PATTERNS) {
+        if (pattern.test(text)) return "met";
+    }
+    for (const pattern of IMPOSSIBLE_PATTERNS) {
+        if (pattern.test(text)) return "impossible";
+    }
+    return null;
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -41,6 +81,23 @@ function updateGoalStatus(state: TauState, ctx: ExtensionContext): void {
     } else {
         ctx.ui.setStatus("tau-goal", undefined);
     }
+}
+
+/** Extract text from a message's content (string or array of blocks). */
+function extractText(content: unknown): string {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+        .filter(
+            (b: unknown): b is { type: string; text: string } =>
+                typeof b === "object" &&
+                b !== null &&
+                "type" in b &&
+                (b as { type: string }).type === "text" &&
+                "text" in b
+        )
+        .map((b) => b.text)
+        .join(" ");
 }
 
 // ─── Feature registration ───────────────────────────────────────────
@@ -81,30 +138,104 @@ You have an active goal. Keep working toward it every turn.
 On each turn:
 - Make concrete progress toward the goal condition.
 - After your response, evaluate: is the goal condition now met?
-  - If **yes**: state clearly that the goal has been achieved and what was done.
+  - If **yes**: state clearly "Goal is achieved" or "Goal condition is met"
+    and describe what was done. The loop will auto-clear.
   - If **no**: briefly note progress made and what remains.
-  - If **impossible**: explain why the condition cannot be met.
+  - If **impossible**: state "Goal is impossible" and explain why.
 
 Do not stop working until the condition is satisfied or you have determined
-it is genuinely impossible. The goal auto-clears once achieved — do not
-tell the user to run /goal clear after success.
+it is genuinely impossible. Keep calling tools each turn — do not idle.
 `;
         return {
             systemPrompt: event.systemPrompt + goalBlock,
         };
     });
 
-    // Track iterations and persist state on each turn
-    pi.on("turn_end", async (_event, _ctx) => {
-        if (state.activeGoal) {
-            state.activeGoal.iterations += 1;
-            // Persist updated iteration count
-            pi.appendEntry("tau-goal-state", {
-                condition: state.activeGoal.condition,
-                setAt: state.activeGoal.setAt,
-                iterations: state.activeGoal.iterations,
-            });
+    // Stop hook equivalent: force continuation when the goal is not yet met.
+    // This is the critical mechanism — without it, the agent could stop
+    // after any turn even if the goal is incomplete (the system prompt
+    // injection alone is advisory).
+    pi.on("agent_end", async (event, ctx) => {
+        if (!state.activeGoal) return;
+
+        // Don't interfere if there are already pending messages
+        if (ctx.hasPendingMessages()) return;
+
+        // Find the last assistant message and check for tool calls
+        const messages = event.messages;
+        let lastAssistant:
+            | {
+                  role: string;
+                  content: unknown;
+                  stopReason?: string;
+              }
+            | undefined;
+
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i] as Record<string, unknown>;
+            if (
+                msg.role === "assistant" &&
+                "content" in msg &&
+                Array.isArray(msg.content)
+            ) {
+                lastAssistant = {
+                    role: msg.role,
+                    content: msg.content,
+                    stopReason: msg.stopReason as string | undefined,
+                };
+                break;
+            }
         }
+        if (!lastAssistant) return;
+
+        // If the assistant made tool calls, the normal tool loop handles
+        // continuation — the agent hasn't actually tried to stop yet.
+        const content = lastAssistant.content as Array<{ type: string }>;
+        const hasToolCalls = content.some(
+            (part: { type: string }) => part.type === "toolCall"
+        );
+        if (hasToolCalls) return;
+
+        // Only act on clean stops (the agent chose to stop, not aborted)
+        if (lastAssistant.stopReason !== "stop") return;
+
+        // Check if the agent signaled completion
+        const fullText = extractText(lastAssistant.content);
+        const completion = checkGoalCompletion(fullText);
+
+        if (completion === "met") {
+            // Goal achieved — clear it
+            const condition = state.activeGoal.condition;
+            state.activeGoal = undefined;
+            pi.appendEntry("tau-goal-state", {});
+            updateGoalStatus(state, ctx);
+            ctx.ui.notify(`Goal achieved: ${condition}`, "success");
+            return;
+        }
+
+        if (completion === "impossible") {
+            // Goal deemed impossible — clear it but warn
+            const condition = state.activeGoal.condition;
+            state.activeGoal = undefined;
+            pi.appendEntry("tau-goal-state", {});
+            updateGoalStatus(state, ctx);
+            ctx.ui.notify(`Goal marked impossible: ${condition}`, "warning");
+            return;
+        }
+
+        // Goal NOT met — force continuation (Stop hook equivalent).
+        // This is the key difference from advisory-only approaches:
+        // we physically prevent the agent from stopping.
+        state.activeGoal.iterations += 1;
+        pi.appendEntry("tau-goal-state", {
+            condition: state.activeGoal.condition,
+            setAt: state.activeGoal.setAt,
+            iterations: state.activeGoal.iterations,
+        });
+
+        const continuationMsg = `[Goal continuation — turn ${state.activeGoal.iterations}] Goal: ${state.activeGoal.condition}. You have not yet met the goal condition. Call tools and continue working. Do not idle.`;
+
+        pi.sendUserMessage(continuationMsg, { deliverAs: "followUp" });
     });
 
     // ── /goal command ─────────────────────────────────────────────
@@ -168,7 +299,7 @@ tell the user to run /goal clear after success.
             // Trigger a turn so the agent starts working immediately
             if (ctx.isIdle()) {
                 pi.sendUserMessage(
-                    `Goal: ${trimmed}. Work toward this. Do not stop until it is complete.`
+                    `Goal: ${trimmed}. Work toward this. Do not stop until it is complete. Keep calling tools each turn.`
                 );
             }
         },
