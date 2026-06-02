@@ -7,7 +7,7 @@
  */
 
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
-import type { BackgroundJob, RunningProcess, Task } from "./types.ts";
+import type { BackgroundJob, RunningProcess, Task, WorkflowRun } from "./types.ts";
 import type { GoalState } from "./types.ts";
 import type {
     PermissionMode,
@@ -98,6 +98,11 @@ export class TauState {
 
     enabledTools = new Set<string>();
     allTools: ToolInfo[] = [];
+
+    // ── Workflow ──────────────────────────────────────────────────────
+
+    /** The active workflow run, if any. */
+    activeWorkflow: WorkflowRun | undefined;
 
     // ── Titlebar ─────────────────────────────────────────────────────
 
