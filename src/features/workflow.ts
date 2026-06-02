@@ -394,12 +394,9 @@ export async function executeWorkflowScript(
     try {
         const script = new Script(wrappedScript);
         // runInContext returns unknown; narrow to string
-        const rawResult: unknown = await script.runInContext(
-            vmContext,
-            {
-                timeout: 30 * 60 * 1000, // 30 minute timeout
-            }
-        );
+        const rawResult: unknown = await script.runInContext(vmContext, {
+            timeout: 30 * 60 * 1000, // 30 minute timeout
+        });
 
         const result =
             typeof rawResult === "string"

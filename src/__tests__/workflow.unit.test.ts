@@ -34,10 +34,10 @@ await agent("go");
 `);
         assert.equal(meta.name, "phased-workflow");
         assert.ok(meta.phases);
-        assert.equal(meta.phases!.length, 2);
-        assert.equal(meta.phases![0].title, "Research");
-        assert.equal(meta.phases![0].kind, "parallel");
-        assert.equal(meta.phases![1].kind, "sequential");
+        assert.equal(meta.phases.length, 2);
+        assert.equal(meta.phases[0].title, "Research");
+        assert.equal(meta.phases[0].kind, "parallel");
+        assert.equal(meta.phases[1].kind, "sequential");
     });
 
     void it("throws when meta block is missing", async () => {
@@ -79,9 +79,7 @@ export const meta = {
 
 void describe("workflow checkDeterminism", () => {
     void it("returns undefined for deterministic scripts", async () => {
-        const { checkDeterminism } = await import(
-            "../features/workflow.ts"
-        );
+        const { checkDeterminism } = await import("../features/workflow.ts");
         assert.equal(
             checkDeterminism('const r = await agent("hello");'),
             undefined
@@ -89,27 +87,21 @@ void describe("workflow checkDeterminism", () => {
     });
 
     void it("returns error for Date.now()", async () => {
-        const { checkDeterminism } = await import(
-            "../features/workflow.ts"
-        );
+        const { checkDeterminism } = await import("../features/workflow.ts");
         const err = checkDeterminism("const t = Date.now();");
         assert.ok(err);
         assert.ok(err.includes("Date.now()"));
     });
 
     void it("returns error for Math.random()", async () => {
-        const { checkDeterminism } = await import(
-            "../features/workflow.ts"
-        );
+        const { checkDeterminism } = await import("../features/workflow.ts");
         const err = checkDeterminism("const r = Math.random();");
         assert.ok(err);
         assert.ok(err.includes("Math.random()"));
     });
 
     void it("returns error for new Date()", async () => {
-        const { checkDeterminism } = await import(
-            "../features/workflow.ts"
-        );
+        const { checkDeterminism } = await import("../features/workflow.ts");
         const err = checkDeterminism("const d = new Date();");
         assert.ok(err);
         assert.ok(err.includes("new Date()"));
@@ -120,45 +112,35 @@ void describe("workflow checkDeterminism", () => {
 
 void describe("workflow computeAgentKey", () => {
     void it("returns a stable key for same inputs", async () => {
-        const { computeAgentKey } = await import(
-            "../features/workflow.ts"
-        );
+        const { computeAgentKey } = await import("../features/workflow.ts");
         const key1 = computeAgentKey("hello", { model: "sonnet" });
         const key2 = computeAgentKey("hello", { model: "sonnet" });
         assert.equal(key1, key2);
     });
 
     void it("returns different keys for different prompts", async () => {
-        const { computeAgentKey } = await import(
-            "../features/workflow.ts"
-        );
+        const { computeAgentKey } = await import("../features/workflow.ts");
         const key1 = computeAgentKey("hello");
         const key2 = computeAgentKey("world");
         assert.notEqual(key1, key2);
     });
 
     void it("returns different keys for different opts", async () => {
-        const { computeAgentKey } = await import(
-            "../features/workflow.ts"
-        );
+        const { computeAgentKey } = await import("../features/workflow.ts");
         const key1 = computeAgentKey("hello", { model: "sonnet" });
         const key2 = computeAgentKey("hello", { model: "opus" });
         assert.notEqual(key1, key2);
     });
 
     void it("returns same key for same prompt without opts", async () => {
-        const { computeAgentKey } = await import(
-            "../features/workflow.ts"
-        );
+        const { computeAgentKey } = await import("../features/workflow.ts");
         const key1 = computeAgentKey("hello");
         const key2 = computeAgentKey("hello");
         assert.equal(key1, key2);
     });
 
     void it("key starts with agent: prefix", async () => {
-        const { computeAgentKey } = await import(
-            "../features/workflow.ts"
-        );
+        const { computeAgentKey } = await import("../features/workflow.ts");
         const key = computeAgentKey("test");
         assert.ok(key.startsWith("agent:"));
     });
@@ -168,9 +150,7 @@ void describe("workflow computeAgentKey", () => {
 
 void describe("workflow getCachedResult", () => {
     void it("finds a cached result by key", async () => {
-        const { getCachedResult } = await import(
-            "../features/workflow.ts"
-        );
+        const { getCachedResult } = await import("../features/workflow.ts");
         const run = {
             runId: "wf_test",
             name: "test",
@@ -192,9 +172,7 @@ void describe("workflow getCachedResult", () => {
     });
 
     void it("returns undefined for missing key", async () => {
-        const { getCachedResult } = await import(
-            "../features/workflow.ts"
-        );
+        const { getCachedResult } = await import("../features/workflow.ts");
         const run = {
             runId: "wf_test",
             name: "test",
@@ -211,9 +189,7 @@ void describe("workflow getCachedResult", () => {
 
 void describe("workflow extractScriptBody", () => {
     void it("strips the meta export block", async () => {
-        const { extractScriptBody } = await import(
-            "../features/workflow.ts"
-        );
+        const { extractScriptBody } = await import("../features/workflow.ts");
         const body = extractScriptBody(`
 export const meta = {
   name: "test",
@@ -227,9 +203,7 @@ const r = await agent("hello");
     });
 
     void it("returns trimmed body when no meta present", async () => {
-        const { extractScriptBody } = await import(
-            "../features/workflow.ts"
-        );
+        const { extractScriptBody } = await import("../features/workflow.ts");
         const body = extractScriptBody('const r = await agent("go");');
         assert.ok(body.includes("agent"));
     });
@@ -244,18 +218,13 @@ void describe("workflow registration", () => {
     });
 
     void it("registers /workflow command", async () => {
-        const { registerWorkflow } = await import(
-            "../features/workflow.ts"
-        );
+        const { registerWorkflow } = await import("../features/workflow.ts");
 
         const commands = new Map<
             string,
             { description: string; handler: () => Promise<void> }
         >();
-        const events = new Map<
-            string,
-            Array<() => Promise<unknown>>
-        >();
+        const events = new Map<string, Array<() => Promise<unknown>>>();
         const entries: Array<{
             type: string;
             customType: string;
