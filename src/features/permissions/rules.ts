@@ -39,16 +39,16 @@ export function parseRule(rule: string): ParsedRule {
  * Match a Claude Code glob pattern against an input string.
  *
  * * is a wildcard (matches any characters including /).
- * Other regex metacharacters are escaped except . which is
- * preserved so that patterns like "git commit.*--no-verify" work
- * as expected. No end anchor — patterns match a prefix of the input.
+ * Other regex metacharacters (including .) are escaped.
+ * Anchored at both ends so "*rm* /" matches "rm -rf /"
+ * but not "biome format --write /tmp/file".
  */
 function matchGlob(pattern: string, input: string): boolean {
     const regexStr = pattern
-        .replace(/[+^${}()|[\]\\]/g, (char) => "\\" + char)
+        .replace(/[.+^${}()|[\]\\]/g, (char) => "\\" + char)
         .replace(/\*/g, ".*");
 
-    const regex = new RegExp("^" + regexStr);
+    const regex = new RegExp("^" + regexStr + "$");
     return regex.test(input);
 }
 

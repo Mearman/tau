@@ -486,14 +486,14 @@ function ruleMatchesPattern(pattern: string, input: string): boolean {
 
     // Wildcard pattern — * matches any characters.
     // Treats the pattern as a partial regex where * → .* and
-    // other regex metacharacters are escaped. No end anchor so
-    // "git commit.*--no-verify" matches
-    // "git commit --no-verify -m \"test\"".
+    // other regex metacharacters (including .) are escaped.
+    // Anchored at both ends so "*rm* /" matches "rm -rf /"
+    // but not "biome format --write /tmp/file".
     if (pattern.includes("*")) {
         const regexStr = pattern
-            .replace(/[+^${}()|[\]\\]/g, (c) => "\\" + c)
+            .replace(/[.+^${}()|[\]\\]/g, (c) => "\\" + c)
             .replace(/\*/g, ".*");
-        return new RegExp("^" + regexStr).test(input);
+        return new RegExp("^" + regexStr + "$").test(input);
     }
 
     // Exact match
