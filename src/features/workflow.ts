@@ -889,15 +889,16 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
         const modelId = model ? `${model.provider}/${model.id}` : undefined;
 
         try {
-            const { result, cachedResults: finalResults } =
+            const { result, cachedResults } =
                 await executeWorkflowScript(
                     body,
                     run,
                     ctx.cwd,
                     modelId,
-                    (_event) => {
-                        // Update status on progress
-                        run.cachedResults = finalResults;
+                    () => {
+                        // Refresh status bar on every progress event.
+                        // The cached results are written to run.cachedResults
+                        // after executeWorkflowScript returns.
                         updateWorkflowStatus(state, ctx);
                     }
                 );
@@ -905,7 +906,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
             // Mark completed
             run.status = "completed";
             run.completedAt = Date.now();
-            run.cachedResults = finalResults;
+            run.cachedResults = cachedResults;
 
             pi.appendEntry("tau-workflow-state", run);
             state.activeWorkflow = run;
@@ -913,7 +914,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
 
             const summary =
                 `Workflow "${meta.name}" completed (run ${runId}). ` +
-                `${finalResults.length} agent results cached. ` +
+                `${cachedResults.length} agent results cached. ` +
                 (scriptPath
                     ? `Script: ${scriptPath}. To resume: /workflow run --file ${scriptPath}`
                     : "");
@@ -924,7 +925,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
                     runId,
                     name: meta.name,
                     status: "completed",
-                    agentCount: finalResults.length,
+                    agentCount: cachedResults.length,
                     resultPreview: result.slice(0, 500),
                     scriptPath,
                 },
