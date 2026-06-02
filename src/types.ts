@@ -94,3 +94,43 @@ export interface GoalState {
     setAt: number;
     iterations: number;
 }
+
+// ─── Workflow ────────────────────────────────────────────────────────
+
+/** Metadata block extracted from a workflow script's `export const meta`. */
+export interface WorkflowMeta {
+    name: string;
+    description: string;
+    phases?: Array<{ title: string; kind: "sequential" | "parallel" }>;
+}
+
+/** Cached result from a single agent() call within a workflow. */
+export interface WorkflowAgentResult {
+    /** SHA-256 hash derived from (prompt, opts). */
+    key: string;
+    prompt: string;
+    opts?: Record<string, unknown>;
+    /** Agent output text. */
+    result: string;
+    completedAt: number;
+}
+
+/** State for a single workflow run, persisted in session entries. */
+export interface WorkflowRun {
+    /** Unique run identifier (format: wf_<alphanumeric>). */
+    runId: string;
+    /** Workflow name from meta. */
+    name: string;
+    /** Full script source. */
+    script: string;
+    /** Persisted script file path (for resume/edit cycle). */
+    scriptPath?: string;
+    /** User-provided arguments, exposed as `args` global in the script. */
+    args?: unknown;
+    status: "running" | "completed" | "failed" | "killed";
+    startedAt: number;
+    completedAt?: number;
+    /** Cached agent results for resumability. Keyed by agent cache key. */
+    cachedResults: WorkflowAgentResult[];
+    error?: string;
+}

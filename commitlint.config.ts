@@ -23,6 +23,7 @@ const config: UserConfig = {
                 "ci",
                 "deps",
                 "permissions",
+                "workflow",
             ],
         ],
     },
