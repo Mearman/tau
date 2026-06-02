@@ -37,18 +37,12 @@ void describe("bash permission pattern matching — git commit.*--no-verify", ()
     ];
 
     void it("matches 'git commit.--no-verify' (literal dot)", () => {
-        const result = checkBashPermissions(
-            rules,
-            "git commit.--no-verify"
-        );
+        const result = checkBashPermissions(rules, "git commit.--no-verify");
         assert.equal(result?.decision, "ask");
     });
 
     void it("does not match 'git commit --no-verify' (space, not dot)", () => {
-        const result = checkBashPermissions(
-            rules,
-            "git commit --no-verify"
-        );
+        const result = checkBashPermissions(rules, "git commit --no-verify");
         assert.equal(result, undefined);
     });
 
@@ -76,10 +70,7 @@ void describe("bash permission pattern matching — git commit *--no-verify*", (
     });
 
     void it("matches 'git commit --no-verify'", () => {
-        const result = checkBashPermissions(
-            rules,
-            "git commit --no-verify"
-        );
+        const result = checkBashPermissions(rules, "git commit --no-verify");
         assert.equal(result?.decision, "ask");
     });
 

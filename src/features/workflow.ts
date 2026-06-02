@@ -171,13 +171,7 @@ export async function executeAgent(
     writeFileSync(promptFile, prompt);
 
     const modelArg = model ? ["--model", model] : [];
-    const spawnArgs = [
-        "-p",
-        "--mode",
-        "text",
-        ...modelArg,
-        `@${promptFile}`,
-    ];
+    const spawnArgs = ["-p", "--mode", "text", ...modelArg, `@${promptFile}`];
 
     return new Promise((resolve, reject) => {
         const proc = spawn("pi", spawnArgs, {
