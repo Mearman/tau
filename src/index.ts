@@ -62,6 +62,7 @@ import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
 // Handoff disabled — import { registerHandoff } from "./features/handoff.ts";
 import { registerGoal } from "./features/goal.ts";
+import { registerWorkflow } from "./features/workflow.ts";
 import { registerPreset } from "./features/preset.ts";
 import { registerLoop } from "./features/loop.ts";
 import { registerSessionName } from "./features/session-name.ts";
@@ -109,6 +110,7 @@ export default function (pi: ExtensionAPI) {
     registerPermissions(pi, state);
     registerPlanTools(pi, state);
     registerGoal(pi, state);
+    registerWorkflow(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
