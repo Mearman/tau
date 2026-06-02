@@ -889,19 +889,18 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
         const modelId = model ? `${model.provider}/${model.id}` : undefined;
 
         try {
-            const { result, cachedResults } =
-                await executeWorkflowScript(
-                    body,
-                    run,
-                    ctx.cwd,
-                    modelId,
-                    () => {
-                        // Refresh status bar on every progress event.
-                        // The cached results are written to run.cachedResults
-                        // after executeWorkflowScript returns.
-                        updateWorkflowStatus(state, ctx);
-                    }
-                );
+            const { result, cachedResults } = await executeWorkflowScript(
+                body,
+                run,
+                ctx.cwd,
+                modelId,
+                () => {
+                    // Refresh status bar on every progress event.
+                    // The cached results are written to run.cachedResults
+                    // after executeWorkflowScript returns.
+                    updateWorkflowStatus(state, ctx);
+                }
+            );
 
             // Mark completed
             run.status = "completed";
