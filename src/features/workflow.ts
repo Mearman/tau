@@ -44,6 +44,7 @@ import { join, resolve } from "node:path";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
+    ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import type { TauState } from "../state.ts";
@@ -503,18 +504,7 @@ export function listWorkflows(cwd: string): string[] {
 
 // ─── Status helpers ─────────────────────────────────────────────────
 
-function updateWorkflowStatus(
-    state: TauState,
-    ctx:
-        | ExtensionCommandContext
-        | {
-              hasUI: boolean;
-              ui: {
-                  setStatus: (n: string, c: unknown) => void;
-                  theme: { fg: (c: string, t: string) => string };
-              };
-          }
-): void {
+function updateWorkflowStatus(state: TauState, ctx: ExtensionContext): void {
     if (!ctx.hasUI) return;
 
     const run = state.activeWorkflow;
@@ -794,7 +784,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
     async function executeRun(
         pi: ExtensionAPI,
         state: TauState,
-        ctx: ExtensionCommandContext,
+        ctx: ExtensionContext,
         script: string,
         scriptPath: string | undefined,
         args: unknown,
@@ -946,7 +936,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
                 undefined,
                 args
             );
-            ctx.ui.notify(result.summary, "success");
+            ctx.ui.notify(result.summary, "info");
         } catch (err) {
             ctx.ui.notify(
                 `Workflow failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -972,7 +962,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
                 filePath,
                 args
             );
-            ctx.ui.notify(result.summary, "success");
+            ctx.ui.notify(result.summary, "info");
         } catch (err) {
             ctx.ui.notify(
                 `Workflow failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -997,7 +987,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
                 undefined,
                 args
             );
-            ctx.ui.notify(result.summary, "success");
+            ctx.ui.notify(result.summary, "info");
         } catch (err) {
             ctx.ui.notify(
                 `Workflow failed: ${err instanceof Error ? err.message : String(err)}`,
