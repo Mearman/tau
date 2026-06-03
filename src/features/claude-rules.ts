@@ -6,6 +6,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 export function findMarkdownFiles(
     dir: string,
@@ -36,11 +38,13 @@ export function findMarkdownFiles(
     return results;
 }
 
-export function registerClaudeRules(pi: ExtensionAPI): void {
+export function registerClaudeRules(pi: ExtensionAPI, state: TauState): void {
     let ruleFiles: string[] = [];
     let rulesDir = "";
 
     pi.on("session_start", async (_event, ctx) => {
+        if (!isFeatureEnabled(state, "claude-rules")) return;
+
         rulesDir = path.join(ctx.cwd, ".claude", "rules");
         ruleFiles = findMarkdownFiles(rulesDir);
 

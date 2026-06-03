@@ -23,6 +23,7 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import type { GoalState } from "../types.ts";
 
 // ─── Completion detection ───────────────────────────────────────────
@@ -251,6 +252,11 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
         description:
             "Set a goal — keep working until the condition is met. Usage: /goal <condition>, /goal clear",
         handler: async (args, ctx) => {
+            if (!isFeatureEnabled(state, "goal")) {
+                ctx.ui.notify("Goal is disabled — run /tau to enable", "info");
+                return;
+            }
+
             const trimmed = (args ?? "").trim();
 
             // /goal clear — remove the active goal

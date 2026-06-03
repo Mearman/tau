@@ -11,6 +11,7 @@ import {
     SettingsList,
 } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import {
     isSystemDndActive,
     lastAssistantText,
@@ -160,6 +161,14 @@ export function registerNotifications(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("notifications", {
         description: "Configure notifications (providers, DnD, persistence)",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "notifications")) {
+                ctx.ui.notify(
+                    "Notifications are disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const systemDnd = await isSystemDndActive();
 
             await ctx.ui.custom((_tui, theme, _kb, done) => {

@@ -63,6 +63,8 @@ import {
 import * as cdp from "./cdp.ts";
 import * as applescript from "./applescript.ts";
 import * as bridge from "./bridge.ts";
+import type { TauState } from "../../state.ts";
+import { isFeatureEnabled } from "../features-helpers.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -232,7 +234,7 @@ async function resolveCDPPage(
 
 // ── Registration ─────────────────────────────────────────────────────
 
-export function registerWebBrowse(pi: ExtensionAPI): void {
+export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
     // Clean up connections on session shutdown
     pi.on("session_shutdown", async () => {
         cdp.disconnect();
@@ -265,6 +267,16 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             ),
         }),
         async execute(_toolCallId, params, signal) {
+            if (!isFeatureEnabled(state, "web-browse")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Web browsing is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
             const mode = params.browser ?? "bridge";
             let usedMode: string = "bridge";
             let tabs: Array<
@@ -431,6 +443,16 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             tabId: TAB_ID_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
+            if (!isFeatureEnabled(state, "web-browse")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Web browsing is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
             const browserMode = params.browser ?? "isolated";
             const format = params.format ?? "text";
 
@@ -602,6 +624,16 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             tabId: TAB_ID_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
+            if (!isFeatureEnabled(state, "web-browse")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Web browsing is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
             const browserMode = params.browser ?? "isolated";
 
             if (browserMode === "applescript") {
@@ -840,6 +872,16 @@ export function registerWebBrowse(pi: ExtensionAPI): void {
             tabId: TAB_ID_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
+            if (!isFeatureEnabled(state, "web-browse")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Web browsing is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
             const browserMode = params.browser ?? "isolated";
             const returnFormat = params.returnFormat ?? "text";
 

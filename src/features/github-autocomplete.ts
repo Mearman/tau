@@ -10,6 +10,8 @@ import {
     type AutocompleteSuggestions,
     fuzzyFilter,
 } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 type GitHubIssue = {
     number: number;
@@ -176,8 +178,13 @@ function createIssueAutocompleteProvider(
     };
 }
 
-export function registerGithubAutocomplete(pi: ExtensionAPI): void {
+export function registerGithubAutocomplete(
+    pi: ExtensionAPI,
+    state: TauState
+): void {
     pi.on("session_start", async (_event, ctx) => {
+        if (!isFeatureEnabled(state, "github-autocomplete")) return;
+
         const resolvedRepo = await resolveGitHubRepo(pi, ctx.cwd);
         if (!resolvedRepo.ok) {
             ctx.ui.notify(resolvedRepo.error, "error");

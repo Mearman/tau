@@ -23,6 +23,7 @@ import type {
 import { Type } from "@earendil-works/pi-ai";
 import { tmpdir } from "node:os";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import type { BackgroundJob } from "../types.ts";
 import {
     createJobDonePromise,
@@ -177,6 +178,17 @@ export function registerAgentBackground(
             _onUpdate,
             ctx
         ): Promise<AgentToolResult<undefined>> {
+            if (!isFeatureEnabled(state, "agent-background")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Agent background is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
+
             const jobId = generateJobId(++state.jobCounter);
             const logPath = logPathForJob(jobId);
             mkdirSync(logPath.replace(/\/[^/]+$/, ""), { recursive: true });

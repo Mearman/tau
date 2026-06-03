@@ -48,6 +48,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import type {
     WorkflowMeta,
     WorkflowRun,
@@ -604,6 +605,14 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
         description:
             "Orchestrate multi-agent workflows. Usage: /workflow run <name>, /workflow run --file <path>, /workflow run --inline <script>, /workflow list, /workflow status, /workflow stop",
         handler: async (args, ctx: ExtensionCommandContext) => {
+            if (!isFeatureEnabled(state, "workflow")) {
+                ctx.ui.notify(
+                    "Workflow is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const trimmed = (args ?? "").trim();
             const tokens = trimmed.split(/\s+/);
             const subcommand = tokens[0]?.toLowerCase();
@@ -771,6 +780,17 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
         }),
 
         async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+            if (!isFeatureEnabled(state, "workflow")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Workflow is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
+
             // Resolve script source
             let script: string | undefined;
             let scriptPath: string | undefined;

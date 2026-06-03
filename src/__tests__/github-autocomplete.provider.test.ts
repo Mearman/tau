@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerGithubAutocomplete } from "../features/github-autocomplete.ts";
+import { TauState } from "../state.ts";
 
 /**
  * Test the autocomplete provider via DI.
@@ -34,7 +35,7 @@ void describe("github-autocomplete provider", () => {
             },
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         const ctx = {
             cwd: "/tmp",

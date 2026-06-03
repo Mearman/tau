@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerGithubAutocomplete } from "../features/github-autocomplete.ts";
+import { TauState } from "../state.ts";
 
 function setupProvider(
     issues: { number: number; title: string; state: string }[]
@@ -24,7 +25,7 @@ function setupProvider(
         },
     } as never;
 
-    registerGithubAutocomplete(pi);
+    registerGithubAutocomplete(pi, new TauState());
 
     const ctx = {
         cwd: "/tmp",

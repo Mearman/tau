@@ -14,6 +14,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 /**
  * Capture the reload function from a command context.
@@ -61,6 +62,17 @@ export function registerReloadTool(pi: ExtensionAPI, state: TauState): void {
             _onUpdate,
             _ctx
         ): Promise<AgentToolResult<undefined>> {
+            if (!isFeatureEnabled(state, "reload")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Reload is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
+
             if (!state.commandContextReload) {
                 return {
                     content: [
@@ -90,7 +102,7 @@ export function registerReloadTool(pi: ExtensionAPI, state: TauState): void {
                     }
                 }
             };
-            pollIdleAndReload();
+            void pollIdleAndReload();
 
             return {
                 content: [

@@ -73,6 +73,8 @@ import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
 import { registerPlanTools } from "./features/plan-tools.js";
+import { registerTauCommand } from "./features/features-register.ts";
+import { restoreFeaturesState } from "./features/features-state.ts";
 import { isTmuxAvailable } from "./tmux.ts";
 import {
     cleanupTmuxRunDir,
@@ -93,24 +95,25 @@ export default function (pi: ExtensionAPI) {
     registerTask(pi, state);
     registerToolsSelector(pi, state);
     registerNotifications(pi, state);
-    registerBookmark(pi);
-    registerClaudeRules(pi);
-    registerCustomFooter(pi);
-    registerGitCheckpoint(pi);
-    registerGithubAutocomplete(pi);
+    registerBookmark(pi, state);
+    registerClaudeRules(pi, state);
+    registerCustomFooter(pi, state);
+    registerGitCheckpoint(pi, state);
+    registerGithubAutocomplete(pi, state);
     // registerHandoff(pi, state); // disabled
-    registerPreset(pi);
-    registerLoop(pi);
-    registerSessionName(pi);
-    registerSummarize(pi);
-    registerContext(pi);
-    registerWebBrowse(pi);
+    registerPreset(pi, state);
+    registerLoop(pi, state);
+    registerSessionName(pi, state);
+    registerSummarize(pi, state);
+    registerContext(pi, state);
+    registerWebBrowse(pi, state);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
     registerPlanTools(pi, state);
     registerGoal(pi, state);
     registerWorkflow(pi, state);
+    registerTauCommand(pi, state);
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
@@ -301,6 +304,7 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
     });
 
     pi.on("session_tree", async (_event, ctx) => {
+        restoreFeaturesState(state, ctx);
         reconstructTaskState(state, ctx);
         restoreToolsFromBranch(pi, state, ctx);
     });
@@ -309,6 +313,9 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
 
     pi.on("session_start", async (_event, ctx) => {
         ctx.ui.setStatus("tau-turn", ctx.ui.theme.fg("dim", "Ready"));
+
+        // ── Feature toggle state restoration ───────────────────────
+        restoreFeaturesState(state, ctx);
 
         // ── Tmux detection ───────────────────────────────────────────
         state.tmuxAvailable = isTmuxAvailable();

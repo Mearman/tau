@@ -50,7 +50,7 @@ function capturePreset() {
         sendMessage: () => {},
     } as never;
 
-    registerPreset(pi);
+    registerPreset(pi, new TauState());
     return { commands, eventHandlers, flags, entries, pi, state };
 }
 

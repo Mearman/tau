@@ -4,11 +4,20 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
-export function registerBookmark(pi: ExtensionAPI): void {
+export function registerBookmark(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("bookmark", {
         description: "Bookmark last message (usage: /bookmark [label])",
         handler: async (args, ctx) => {
+            if (!isFeatureEnabled(state, "bookmark")) {
+                ctx.ui.notify(
+                    "Bookmark is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
             const label = args.trim() || `bookmark-${Date.now()}`;
 
             const entries = ctx.sessionManager.getEntries();
@@ -31,6 +40,13 @@ export function registerBookmark(pi: ExtensionAPI): void {
     pi.registerCommand("unbookmark", {
         description: "Remove bookmark from last labelled entry",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "bookmark")) {
+                ctx.ui.notify(
+                    "Bookmark is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
             const entries = ctx.sessionManager.getEntries();
             for (let i = entries.length - 1; i >= 0; i--) {
                 const entry = entries[i];

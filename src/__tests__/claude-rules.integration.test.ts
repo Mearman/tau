@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerClaudeRules } from "../features/claude-rules.ts";
+import { TauState } from "../state.ts";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,7 +17,8 @@ void describe("claude-rules register + events", () => {
             },
         } as never;
 
-        registerClaudeRules(pi);
+        const state = new TauState();
+        registerClaudeRules(pi, state);
         assert.ok(handlers["session_start"]);
         assert.ok(handlers["before_agent_start"]);
     });
@@ -36,7 +38,7 @@ void describe("claude-rules register + events", () => {
             },
         } as never;
 
-        registerClaudeRules(pi);
+        registerClaudeRules(pi, new TauState());
 
         const ctx = {
             cwd: TEST_DIR,
@@ -67,7 +69,7 @@ void describe("claude-rules register + events", () => {
             },
         } as never;
 
-        registerClaudeRules(pi);
+        registerClaudeRules(pi, new TauState());
 
         // First trigger session_start to load rules
         const sessionCtx = {
@@ -96,7 +98,7 @@ void describe("claude-rules register + events", () => {
             },
         } as never;
 
-        registerClaudeRules(pi);
+        registerClaudeRules(pi, new TauState());
 
         // Trigger session_start with a dir that has no .claude/rules
         const sessionCtx = {

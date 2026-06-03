@@ -13,6 +13,8 @@ import {
     getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 export type ContentBlock = {
     type?: string;
@@ -163,10 +165,18 @@ const showSummaryUi = async (summary: string, ctx: ExtensionCommandContext) => {
     });
 };
 
-export function registerSummarize(pi: ExtensionAPI): void {
+export function registerSummarize(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("summarize", {
         description: "Summarize the current conversation in a custom UI",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "summarize")) {
+                ctx.ui.notify(
+                    "Summarize is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const branch = ctx.sessionManager.getBranch();
             const conversationText = buildConversationText(branch);
 

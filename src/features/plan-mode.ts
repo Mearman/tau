@@ -14,6 +14,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import type { PermissionMode } from "./permissions/types.js";
 import { modeStatusText, modeColour } from "./permissions/index.js";
 import { sessionSlug, createPlanFile } from "./plan-file.ts";
@@ -92,6 +93,13 @@ export function registerPlanMode(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("plan", {
         description: "Toggle plan mode (read-only exploration)",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "plan-mode")) {
+                ctx.ui.notify(
+                    "Plan mode is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
             togglePlanMode(pi, state, ctx);
         },
     });
@@ -99,6 +107,7 @@ export function registerPlanMode(pi: ExtensionAPI, state: TauState): void {
     pi.registerShortcut(Key.ctrlAlt("p"), {
         description: "Toggle plan mode",
         handler: async (ctx) => {
+            if (!isFeatureEnabled(state, "plan-mode")) return;
             togglePlanMode(pi, state, ctx);
         },
     });

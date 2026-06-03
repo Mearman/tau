@@ -30,6 +30,8 @@ import type {
     SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Container, SelectList, Spacer, Text } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 // --- Constants ---
 
@@ -436,7 +438,7 @@ export function truncatePrompt(text: string): string {
 
 // --- Feature registration ---
 
-export function registerLoop(pi: ExtensionAPI): void {
+export function registerLoop(pi: ExtensionAPI, state: TauState): void {
     const loops: LoopEntry[] = [];
     let nextId = 1;
 
@@ -537,6 +539,7 @@ export function registerLoop(pi: ExtensionAPI): void {
     // --- Event handlers ---
 
     pi.on("session_start", async () => {
+        if (!isFeatureEnabled(state, "loop")) return;
         stopAll();
         nextId = 1;
     });
@@ -782,6 +785,8 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
     pi.registerShortcut("ctrl+l", {
         description: "Open loop manager",
         handler: async (_ctx) => {
+            if (!isFeatureEnabled(state, "loop")) return;
+
             // Shortcuts receive ExtensionContext, not ExtensionCommandContext.
             // We can't open the full TUI from here without a command context.
             // Instead, show a notification summary.
@@ -809,6 +814,11 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
         description:
             'Loop a prompt: count (5), duration (5m), cron (*/5 * * * *), or infinite (no prefix). Flags: --completion-promise[="text"]',
         handler: async (args, ctx: ExtensionCommandContext) => {
+            if (!isFeatureEnabled(state, "loop")) {
+                ctx.ui.notify("Loop is disabled — run /tau to enable", "info");
+                return;
+            }
+
             const trimmed = args.trim().toLowerCase();
 
             if (trimmed === "list") {

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerPreset } from "../features/preset.ts";
+import { TauState } from "../state.ts";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -48,7 +49,7 @@ function capturePreset() {
         sendMessage: () => {},
     } as never;
 
-    registerPreset(pi);
+    registerPreset(pi, new TauState());
     return { commands, eventHandlers, flags, entries };
 }
 

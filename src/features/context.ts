@@ -32,6 +32,8 @@ import {
     loadProjectContextFiles,
 } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, matchesKey } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 // ─── Token formatting (mirrors CC formatTokens) ─────────────────────
 
@@ -938,10 +940,18 @@ class ContextViewComponent implements Component {
 
 // ─── Feature registration ───────────────────────────────────────────
 
-export function registerContext(pi: ExtensionAPI): void {
+export function registerContext(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("context", {
         description: "Visualise current context usage as a coloured grid",
         handler: async (_args, ctx: ExtensionCommandContext) => {
+            if (!isFeatureEnabled(state, "context")) {
+                ctx.ui.notify(
+                    "Context visualisation is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const usage = ctx.getContextUsage();
             const systemPrompt = ctx.getSystemPrompt();
             const entries = ctx.sessionManager.getBranch();

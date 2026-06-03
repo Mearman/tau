@@ -22,6 +22,8 @@ import {
     SelectList,
     Text,
 } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 export interface Preset {
     provider?: string;
@@ -98,7 +100,7 @@ export function buildPresetDescription(preset: Preset): string {
     return parts.join(" | ");
 }
 
-export function registerPreset(pi: ExtensionAPI): void {
+export function registerPreset(pi: ExtensionAPI, state: TauState): void {
     let presets: PresetsConfig = {};
     let activePresetName: string | undefined;
     let activePreset: Preset | undefined;
@@ -341,6 +343,8 @@ export function registerPreset(pi: ExtensionAPI): void {
     pi.registerShortcut(Key.ctrlShift("u"), {
         description: "Cycle presets",
         handler: async (ctx) => {
+            if (!isFeatureEnabled(state, "preset")) return;
+
             await cyclePreset(ctx);
         },
     });
@@ -348,6 +352,14 @@ export function registerPreset(pi: ExtensionAPI): void {
     pi.registerCommand("preset", {
         description: "Switch preset configuration",
         handler: async (args, ctx) => {
+            if (!isFeatureEnabled(state, "preset")) {
+                ctx.ui.notify(
+                    "Preset is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             if (args?.trim()) {
                 const name = args.trim();
                 const preset = presets[name];

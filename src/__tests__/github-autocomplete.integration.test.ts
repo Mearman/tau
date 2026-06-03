@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerGithubAutocomplete } from "../features/github-autocomplete.ts";
+import { TauState } from "../state.ts";
 
 /**
  * DI approach: capture the event handlers registered on the mock pi,
@@ -24,7 +25,7 @@ function captureHandlers() {
         }),
     } as never;
 
-    registerGithubAutocomplete(pi);
+    registerGithubAutocomplete(pi, new TauState());
     return handlers;
 }
 
@@ -47,7 +48,7 @@ void describe("github resolveGitHubRepo (via DI)", () => {
             exec: async () => ({ code: 1, stdout: "", stderr: "not a repo" }),
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         // Get the handler directly by re-registering and capturing
         let sessionStartHandler: ((...args: unknown[]) => unknown) | undefined;
@@ -58,7 +59,7 @@ void describe("github resolveGitHubRepo (via DI)", () => {
             exec: async () => ({ code: 1, stdout: "", stderr: "not a repo" }),
         } as never;
 
-        registerGithubAutocomplete(pi2);
+        registerGithubAutocomplete(pi2, new TauState());
 
         const ctx = {
             cwd: "/tmp",
@@ -91,7 +92,7 @@ void describe("github resolveGitHubRepo (via DI)", () => {
             }),
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         const ctx = {
             cwd: "/tmp",
@@ -137,7 +138,7 @@ void describe("github resolveGitHubRepo (via DI)", () => {
             },
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         const ctx = {
             cwd: "/tmp",

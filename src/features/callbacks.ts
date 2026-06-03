@@ -29,6 +29,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ function callbacksDir(sessionId: string): string {
 
 // ─── Feature registration ───────────────────────────────────────────
 
-export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
+export function registerCallbacks(pi: ExtensionAPI, state: TauState): void {
     let nextId = 1;
     const callbacks = new Map<string, ScheduledCallback>();
     let watcher: ReturnType<typeof watch> | null = null;
@@ -392,6 +393,17 @@ export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
             _onUpdate,
             _ctx
         ): Promise<AgentToolResult<undefined>> {
+            if (!isFeatureEnabled(state, "callbacks")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Callbacks are disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
+
             const delayMs = parseDurationToMs(params.in);
             if (delayMs === null) {
                 return {
@@ -442,6 +454,14 @@ export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
         description:
             "Schedule a callback: /remind 2m check the deploy | /remind list | /remind cancel <id> | /remind cancel-all",
         handler: async (args, ctx: ExtensionCommandContext) => {
+            if (!isFeatureEnabled(state, "callbacks")) {
+                ctx.ui.notify(
+                    "Callbacks are disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const trimmed = args.trim();
 
             if (trimmed === "list") {
@@ -528,6 +548,14 @@ export function registerCallbacks(pi: ExtensionAPI, _state: TauState): void {
         description:
             "Print the directory where external processes can write callback files",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "callbacks")) {
+                ctx.ui.notify(
+                    "Callbacks are disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             const dir = callbacksDir(ctx.sessionManager.getSessionId());
             ctx.ui.notify(
                 `External callbacks: write JSON files to ${dir}\n` +

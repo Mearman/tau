@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerSummarize } from "../features/summarize.ts";
+import { TauState } from "../state.ts";
 
 void describe("summarize /summarize command — model errors", () => {
     function captureCommand() {
@@ -13,7 +14,7 @@ void describe("summarize /summarize command — model errors", () => {
                 commandHandler = def.handler;
             },
         } as never;
-        registerSummarize(pi);
+        registerSummarize(pi, new TauState());
         return { commandHandler };
     }
 

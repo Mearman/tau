@@ -16,6 +16,7 @@ import type {
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 import type { Task, TaskDetails, TaskLink, TaskStatus } from "../types.ts";
 import { captureReload } from "./reload.ts";
 
@@ -576,6 +577,17 @@ export function registerTask(pi: ExtensionAPI, state: TauState): void {
         parameters: TaskParams,
 
         async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+            if (!isFeatureEnabled(state, "task")) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Task management is disabled — run /tau to enable",
+                        },
+                    ],
+                };
+            }
+
             switch (params.action) {
                 case "list":
                     return handleList(state);
@@ -624,6 +636,14 @@ export function registerTask(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("tasks", {
         description: "Show all tasks on the current branch",
         handler: async (_args, ctx: ExtensionCommandContext) => {
+            if (!isFeatureEnabled(state, "task")) {
+                ctx.ui.notify(
+                    "Task management is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
+
             captureReload(state, ctx);
             if (!ctx.hasUI) {
                 ctx.ui.notify("/tasks requires interactive mode", "error");

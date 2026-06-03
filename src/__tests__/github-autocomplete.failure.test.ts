@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerGithubAutocomplete } from "../features/github-autocomplete.ts";
+import { TauState } from "../state.ts";
 
 void describe("github-autocomplete — gh failure path", () => {
     void it("notifies error when gh issue list fails", async () => {
@@ -27,7 +28,7 @@ void describe("github-autocomplete — gh failure path", () => {
             },
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         const notifications: { message: string; level: string }[] = [];
         const ctx = {
@@ -72,7 +73,7 @@ void describe("github-autocomplete — gh failure path", () => {
             },
         } as never;
 
-        registerGithubAutocomplete(pi);
+        registerGithubAutocomplete(pi, new TauState());
 
         const notifications: { message: string; level: string }[] = [];
         const ctx = {

@@ -5,13 +5,22 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
-export function registerCustomFooter(pi: ExtensionAPI): void {
+export function registerCustomFooter(pi: ExtensionAPI, state: TauState): void {
     let enabled = false;
 
     pi.registerCommand("footer", {
         description: "Toggle custom footer",
         handler: async (_args, ctx) => {
+            if (!isFeatureEnabled(state, "custom-footer")) {
+                ctx.ui.notify(
+                    "Custom footer is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
             enabled = !enabled;
 
             if (enabled) {

@@ -4,17 +4,23 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
-export function registerGitCheckpoint(pi: ExtensionAPI): void {
+export function registerGitCheckpoint(pi: ExtensionAPI, state: TauState): void {
     const checkpoints = new Map<string, string>();
     let currentEntryId: string | undefined;
 
     pi.on("tool_result", async (_event, ctx) => {
+        if (!isFeatureEnabled(state, "git-checkpoint")) return;
+
         const leaf = ctx.sessionManager.getLeafEntry();
         if (leaf) currentEntryId = leaf.id;
     });
 
     pi.on("turn_start", async () => {
+        if (!isFeatureEnabled(state, "git-checkpoint")) return;
+
         const { stdout } = await pi.exec("git", ["stash", "create"]);
         const ref = stdout.trim();
         if (ref && currentEntryId) {
@@ -23,6 +29,8 @@ export function registerGitCheckpoint(pi: ExtensionAPI): void {
     });
 
     pi.on("session_before_fork", async (event, ctx) => {
+        if (!isFeatureEnabled(state, "git-checkpoint")) return;
+
         const ref = checkpoints.get(event.entryId);
         if (!ref) return;
 

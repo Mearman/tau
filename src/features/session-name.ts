@@ -4,12 +4,21 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TauState } from "../state.ts";
+import { isFeatureEnabled } from "./features-helpers.ts";
 
-export function registerSessionName(pi: ExtensionAPI): void {
+export function registerSessionName(pi: ExtensionAPI, state: TauState): void {
     pi.registerCommand("session-name", {
         description:
             "Set or show session name (usage: /session-name [new name])",
         handler: async (args, ctx) => {
+            if (!isFeatureEnabled(state, "session-name")) {
+                ctx.ui.notify(
+                    "Session name is disabled — run /tau to enable",
+                    "info"
+                );
+                return;
+            }
             const name = args.trim();
 
             if (name) {
