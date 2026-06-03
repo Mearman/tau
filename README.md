@@ -106,6 +106,42 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 - Playwright-core is optional — only needed for isolated and CDP modes
 - Chrome extension + native messaging bridge included for zero-prompt tab access
 
+### Feature Toggles
+
+All tau features can be toggled on or off via the `/tau` command with six configuration scopes:
+
+```
+/tau features                              # open TUI overlay
+/tau features set <id> on|off --scope <s>  # disable or enable a feature
+/tau features get <id>                     # show effective value and source
+/tau features unset <id> --scope <s>       # clear override, fall through to layer below
+```
+
+| Scope | Storage | Survives reload? | Survives session? |
+|-------|----------|-------------------|--------------------|
+| `temporary` | in-memory | no | no |
+| `thread` | session branch entry | yes (per branch) | no |
+| `session` | in-memory | no | no |
+| `cwd` | `cwd/.pi/settings.json` | yes | yes |
+| `project` | nearest `.pi/settings.json` walking up to git root | yes | yes |
+| `global` | `~/.pi/agent/settings.json` | yes | yes |
+
+Features default to on. The TUI shows the source layer for each feature's current value.
+
+On-disk format in `.pi/settings.json`:
+
+```json
+{
+  "tau": {
+    "features": {
+      "bookmark": false
+    }
+  }
+}
+```
+
+Some features (claude-rules, git-checkpoint) bootstrap at session start; toggling them at runtime requires `/reload` to take full effect. The TUI flags these with a reload indicator.
+
 ## Tools
 
 | Tool | Purpose |
@@ -138,6 +174,7 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 | `/preset [name]` | Switch preset configuration |
 | `/handoff <goal>` | Transfer context to a new focused session |
 | `/summarize` | Summarise the current conversation |
+| `/tau` | Toggle features: set, get, unset, or open TUI |
 
 ## Shortcuts
 
