@@ -28,11 +28,7 @@ export function featureLayersFromState(state: TauState): FeatureLayers {
     return {
         temporary: state.featureOverridesTemporary,
         session: state.featureOverridesSession,
-        // `thread` is intentionally not yet wired here — handled in
-        // phase 3 when session-branch persistence is added. Until then
-        // it stays `undefined` and `resolveFeature` falls through to
-        // session / file layers.
-        thread: undefined,
+        thread: state.featureOverridesThread,
         cwd: state.cwdFeatures,
         project: state.projectFeatures,
         global: state.globalFeatures,

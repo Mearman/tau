@@ -114,6 +114,7 @@ export class TauState {
 
     featureOverridesTemporary: Map<string, boolean> | undefined = undefined;
     featureOverridesSession: Map<string, boolean> | undefined = undefined;
+    featureOverridesThread: Map<string, boolean> | undefined = undefined;
     cwdFeatures: Record<string, boolean> | undefined = undefined;
     projectFeatures: Record<string, boolean> | undefined = undefined;
     globalFeatures: Record<string, boolean> | undefined = undefined;
