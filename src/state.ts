@@ -104,6 +104,20 @@ export class TauState {
     enabledTools = new Set<string>();
     allTools: ToolInfo[] = [];
 
+    // ── Feature toggle overrides ─────────────────────────────────────
+    // Three in-memory layers (temporary, session) plus three file-based
+    // layers (cwd, project, global). The `thread` layer is reconstructed
+    // from the most recent `tau-features-thread` session entry on the
+    // current branch at `session_start` and `session_tree`, so it does
+    // not live on state directly. See `features-state.ts` for the
+    // restore logic.
+
+    featureOverridesTemporary: Map<string, boolean> | undefined = undefined;
+    featureOverridesSession: Map<string, boolean> | undefined = undefined;
+    cwdFeatures: Record<string, boolean> | undefined = undefined;
+    projectFeatures: Record<string, boolean> | undefined = undefined;
+    globalFeatures: Record<string, boolean> | undefined = undefined;
+
     // ── Workflow ──────────────────────────────────────────────────────
 
     /** The active workflow run, if any. */
