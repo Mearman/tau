@@ -11,7 +11,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TauState } from "../state.ts";
-import { readTauFeatures, walkProjectLayers } from "./features-files.ts";
+import {
+    readTauFeatures,
+    walkProjectLayers,
+    writeTauFeature,
+} from "./features-files.ts";
+import type { ScopeName } from "./features-cmd.ts";
 
 const THREAD_ENTRY_TYPE = "tau-features-thread";
 
@@ -80,4 +85,77 @@ export function restoreFeaturesState(
     state.globalFeatures = readTauFeatures(
         join(home, ".pi", "agent", "settings.json")
     );
+}
+
+/**
+ * Set a feature override at the specified scope.
+ *
+ * For in-memory scopes (temporary, session, thread), updates the
+ * corresponding Map on state. For file-based scopes (cwd, project,
+ * global), writes to the appropriate `.pi/settings.json` file and
+ * updates the cached record on state.
+ */
+export function setFeatureOverride(
+    state: TauState,
+    id: string,
+    value: boolean,
+    scope: ScopeName,
+    options?: { cwd?: string; homeDir?: string }
+): void {
+    switch (scope) {
+        case "temporary": {
+            if (!state.featureOverridesTemporary) {
+                state.featureOverridesTemporary = new Map();
+            }
+            state.featureOverridesTemporary.set(id, value);
+            break;
+        }
+        case "session": {
+            if (!state.featureOverridesSession) {
+                state.featureOverridesSession = new Map();
+            }
+            state.featureOverridesSession.set(id, value);
+            break;
+        }
+        case "thread": {
+            if (!state.featureOverridesThread) {
+                state.featureOverridesThread = new Map();
+            }
+            state.featureOverridesThread.set(id, value);
+            break;
+        }
+        case "cwd": {
+            const cwd = options?.cwd ?? process.cwd();
+            const path = join(cwd, ".pi", "settings.json");
+            writeTauFeature(path, id, value);
+            state.cwdFeatures = readTauFeatures(path);
+            break;
+        }
+        case "project": {
+            const cwd = options?.cwd ?? process.cwd();
+            const layers = walkProjectLayers(cwd);
+            let projectPath: string | undefined;
+            for (const layer of layers) {
+                if (layer !== join(cwd, ".pi", "settings.json")) {
+                    projectPath = layer;
+                    break;
+                }
+            }
+            if (!projectPath) {
+                throw new Error(
+                    "no project settings file found — use --scope cwd to create one"
+                );
+            }
+            writeTauFeature(projectPath, id, value);
+            state.projectFeatures = readTauFeatures(projectPath);
+            break;
+        }
+        case "global": {
+            const home = options?.homeDir ?? homedir();
+            const path = join(home, ".pi", "agent", "settings.json");
+            writeTauFeature(path, id, value);
+            state.globalFeatures = readTauFeatures(path);
+            break;
+        }
+    }
 }
