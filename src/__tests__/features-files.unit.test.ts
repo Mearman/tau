@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import {
     findProjectSettingsFile,
     readTauFeatures,
+    removeTauFeature,
     walkProjectLayers,
     writeTauFeature,
 } from "../features/features-files.ts";
@@ -151,6 +152,56 @@ void describe("writeTauFeature", () => {
             "features"
         ] as Record<string, boolean>;
         assert.deepEqual(features, { bookmark: false, goal: true });
+    });
+});
+
+void describe("removeTauFeature", () => {
+    void it("is a no-op if the file does not exist", () => {
+        const path = join(TEST_ROOT, "missing.json");
+        // Should not throw.
+        removeTauFeature(path, "bookmark");
+    });
+
+    void it("removes the feature key while preserving other features", () => {
+        const path = join(TEST_ROOT, "settings.json");
+        writeTauFeature(path, "bookmark", false);
+        writeTauFeature(path, "goal", true);
+        removeTauFeature(path, "bookmark");
+        const features = readTauFeatures(path);
+        assert.deepEqual(features, { goal: true });
+    });
+
+    void it("preserves other top-level and tau keys", () => {
+        const path = join(TEST_ROOT, "settings.json");
+        writeFileSync(
+            path,
+            JSON.stringify({
+                compaction: { enabled: true },
+                tau: { features: { bookmark: false }, otherKey: "keep" },
+            })
+        );
+        removeTauFeature(path, "bookmark");
+        const json = readJsonFile(path);
+        assert.deepEqual(json["compaction"], { enabled: true });
+        const tau = json["tau"] as Record<string, unknown>;
+        assert.equal(tau["otherKey"], "keep");
+        assert.deepEqual(tau["features"], {});
+    });
+
+    void it("is a no-op if the key does not exist in features", () => {
+        const path = join(TEST_ROOT, "settings.json");
+        writeTauFeature(path, "goal", true);
+        removeTauFeature(path, "bookmark");
+        const features = readTauFeatures(path);
+        assert.deepEqual(features, { goal: true });
+    });
+
+    void it("is a no-op if the file has no tau key", () => {
+        const path = join(TEST_ROOT, "settings.json");
+        writeFileSync(path, JSON.stringify({ compaction: { enabled: true } }));
+        removeTauFeature(path, "bookmark");
+        const json = readJsonFile(path);
+        assert.deepEqual(json, { compaction: { enabled: true } });
     });
 });
 

@@ -111,6 +111,44 @@ export function writeTauFeature(
 }
 
 /**
+ * Remove a single feature key from a settings.json file.
+ * Creates the file if it does not exist (so the key is trivially absent).
+ * Preserves all other keys including other feature entries.
+ */
+export function removeTauFeature(path: string, id: string): void {
+    if (!existsSync(path)) return;
+    let root: Record<string, unknown> = {};
+    try {
+        const raw = readFileSync(path, "utf8");
+        const parsed: unknown = JSON.parse(raw);
+        if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            !Array.isArray(parsed)
+        ) {
+            root = parsed as Record<string, unknown>;
+        }
+    } catch {
+        return;
+    }
+    const tau = root["tau"];
+    if (typeof tau !== "object" || tau === null || Array.isArray(tau)) return;
+    const features = (tau as Record<string, unknown>)["features"];
+    if (
+        typeof features !== "object" ||
+        features === null ||
+        Array.isArray(features)
+    )
+        return;
+    const feat = features as Record<string, unknown>;
+    if (!(id in feat)) return;
+    const updated = { ...feat };
+    delete updated[id];
+    (tau as Record<string, unknown>)["features"] = updated;
+    writeFileSync(path, JSON.stringify(root, null, 2) + "\n", "utf8");
+}
+
+/**
  * Walk the directory tree from cwd up to the git root (inclusive of
  * the git root's directory itself, exclusive of any ancestor beyond
  * it). Return the path of the closest existing `.pi/settings.json`,

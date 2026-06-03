@@ -13,6 +13,7 @@ import { join } from "node:path";
 import type { TauState } from "../state.ts";
 import {
     readTauFeatures,
+    removeTauFeature,
     walkProjectLayers,
     writeTauFeature,
 } from "./features-files.ts";
@@ -154,6 +155,68 @@ export function setFeatureOverride(
             const home = options?.homeDir ?? homedir();
             const path = join(home, ".pi", "agent", "settings.json");
             writeTauFeature(path, id, value);
+            state.globalFeatures = readTauFeatures(path);
+            break;
+        }
+    }
+}
+
+/**
+ * Remove a feature override at the specified scope.
+ *
+ * For in-memory scopes, deletes the key from the corresponding Map.
+ * For file-based scopes, removes the key from the appropriate
+ * `.pi/settings.json` file and refreshes the cached record.
+ */
+export function unsetFeatureOverride(
+    state: TauState,
+    id: string,
+    scope: ScopeName,
+    options?: { cwd?: string; homeDir?: string }
+): void {
+    switch (scope) {
+        case "temporary": {
+            state.featureOverridesTemporary?.delete(id);
+            break;
+        }
+        case "session": {
+            state.featureOverridesSession?.delete(id);
+            break;
+        }
+        case "thread": {
+            state.featureOverridesThread?.delete(id);
+            break;
+        }
+        case "cwd": {
+            const cwd = options?.cwd ?? process.cwd();
+            const path = join(cwd, ".pi", "settings.json");
+            removeTauFeature(path, id);
+            state.cwdFeatures = readTauFeatures(path);
+            break;
+        }
+        case "project": {
+            const cwd = options?.cwd ?? process.cwd();
+            const layers = walkProjectLayers(cwd);
+            let projectPath: string | undefined;
+            for (const layer of layers) {
+                if (layer !== join(cwd, ".pi", "settings.json")) {
+                    projectPath = layer;
+                    break;
+                }
+            }
+            if (!projectPath) {
+                throw new Error(
+                    "no project settings file found — use --scope cwd to create one"
+                );
+            }
+            removeTauFeature(projectPath, id);
+            state.projectFeatures = readTauFeatures(projectPath);
+            break;
+        }
+        case "global": {
+            const home = options?.homeDir ?? homedir();
+            const path = join(home, ".pi", "agent", "settings.json");
+            removeTauFeature(path, id);
             state.globalFeatures = readTauFeatures(path);
             break;
         }
