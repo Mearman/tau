@@ -86,6 +86,7 @@ function createMockCtx(
         },
         sessionManager: {
             getEntries: () => [],
+            getBranch: () => [],
             getSessionId: () => "test-session",
         },
     } as unknown;
@@ -335,8 +336,8 @@ void describe("goal feature", () => {
 
         const { ctx, notifications } = getNotificationsCtx();
         (
-            ctx.sessionManager as unknown as { getEntries: () => unknown[] }
-        ).getEntries = () => [
+            ctx.sessionManager as unknown as { getBranch: () => unknown[] }
+        ).getBranch = () => [
             {
                 type: "custom",
                 customType: "tau-goal-state",
@@ -355,6 +356,90 @@ void describe("goal feature", () => {
         assert.equal(goal.condition, "resume goal");
         assert.equal(goal.iterations, 5);
         assert.ok(notifications.some((n) => n.includes("Goal restored")));
+    });
+
+    void it("session_start picks the last goal on the active branch", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState();
+        mod.registerGoal(asApi(pi), state);
+
+        const { ctx } = getNotificationsCtx();
+        (
+            ctx.sessionManager as unknown as { getBranch: () => unknown[] }
+        ).getBranch = () => [
+            {
+                type: "message",
+                id: "a1",
+                message: { role: "user", content: "hello" },
+            },
+            {
+                type: "custom",
+                customType: "tau-goal-state",
+                data: {
+                    condition: "old goal from this branch",
+                    setAt: 1000,
+                    iterations: 1,
+                },
+            },
+            {
+                type: "message",
+                id: "b2",
+                message: { role: "user", content: "keep going" },
+            },
+            {
+                type: "custom",
+                customType: "tau-goal-state",
+                data: {
+                    condition: "newer goal on same branch",
+                    setAt: 2000,
+                    iterations: 3,
+                },
+            },
+        ];
+
+        const handler = await getEventHandler(pi, "session_start");
+        await handler({}, ctx);
+
+        const goal = nn(state.activeGoal);
+        assert.equal(goal.condition, "newer goal on same branch");
+        assert.equal(goal.iterations, 3);
+    });
+
+    void it("session_start clears goal when last entry is a cleared state", async () => {
+        const mod = await import("../features/goal.ts");
+        const pi = createMockPi();
+        const state = createState({
+            condition: "stale",
+            setAt: 0,
+            iterations: 0,
+        });
+        mod.registerGoal(asApi(pi), state);
+
+        const { ctx } = getNotificationsCtx();
+        (
+            ctx.sessionManager as unknown as { getBranch: () => unknown[] }
+        ).getBranch = () => [
+            {
+                type: "custom",
+                customType: "tau-goal-state",
+                data: {
+                    condition: "was active",
+                    setAt: 1000,
+                    iterations: 2,
+                },
+            },
+            {
+                type: "custom",
+                customType: "tau-goal-state",
+                data: {},
+            },
+        ];
+
+        const handler = await getEventHandler(pi, "session_start");
+        await handler({}, ctx);
+
+        assert.equal(state.activeGoal, undefined);
     });
 });
 

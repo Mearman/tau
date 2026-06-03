@@ -103,10 +103,10 @@ function extractText(content: unknown): string {
 // ─── Feature registration ───────────────────────────────────────────
 
 export function registerGoal(pi: ExtensionAPI, state: TauState): void {
-    // Restore goal from session on startup
+    // Restore goal from session on startup — walk the active branch
+    // (not all entries) so switching branches picks up the correct goal.
     pi.on("session_start", async (_event, ctx) => {
-        const entries = ctx.sessionManager.getEntries();
-        for (const entry of entries) {
+        for (const entry of ctx.sessionManager.getBranch()) {
             if (
                 entry.type === "custom" &&
                 entry.customType === "tau-goal-state"
@@ -114,10 +114,17 @@ export function registerGoal(pi: ExtensionAPI, state: TauState): void {
                 const data = entry.data as GoalState | undefined;
                 if (data?.condition) {
                     state.activeGoal = { ...data };
-                    ctx.ui.notify(`Goal restored: ${data.condition}`, "info");
+                } else {
+                    // Cleared goal entry — reset
+                    state.activeGoal = undefined;
                 }
-                break;
             }
+        }
+        if (state.activeGoal) {
+            ctx.ui.notify(
+                `Goal restored: ${state.activeGoal.condition}`,
+                "info"
+            );
         }
         updateGoalStatus(state, ctx);
     });

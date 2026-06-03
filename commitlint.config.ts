@@ -24,6 +24,7 @@ const config: UserConfig = {
                 "deps",
                 "permissions",
                 "workflow",
+                "goal",
             ],
         ],
     },
