@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseRule, ruleMatches, findMatchingRule } from "../features/permissions/rules.ts";
+import {
+    parseRule,
+    ruleMatches,
+    findMatchingRule,
+} from "../features/permissions/rules.ts";
 import {
     checkBashPermissions,
     splitCommand,
@@ -11,7 +15,10 @@ import type { PermissionRule } from "../features/permissions/types.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-function makeRule(rule: string, behavior: PermissionRule["behavior"] = "deny"): PermissionRule {
+function makeRule(
+    rule: string,
+    behavior: PermissionRule["behavior"] = "deny"
+): PermissionRule {
     return { rule, behavior, source: "userSettings" as const };
 }
 
@@ -42,7 +49,10 @@ void describe("parseRule", () => {
 
     void it("parses a rule with nested parens in pattern", () => {
         const result = parseRule("Bash(echo $(cat file))");
-        assert.deepEqual(result, { toolName: "Bash", pattern: "echo $(cat file)" });
+        assert.deepEqual(result, {
+            toolName: "Bash",
+            pattern: "echo $(cat file)",
+        });
     });
 
     void it("handles mismatched parens gracefully", () => {
@@ -59,27 +69,42 @@ void describe("parseRule", () => {
 
 void describe("exact match", () => {
     void it("matches an identical command", () => {
-        const result = checkBashPermissions([makeRule("Bash(rm -rf /)", "deny")], "rm -rf /");
+        const result = checkBashPermissions(
+            [makeRule("Bash(rm -rf /)", "deny")],
+            "rm -rf /"
+        );
         assert.equal(result?.decision, "deny");
     });
 
     void it("does not match a different command", () => {
-        const result = checkBashPermissions([makeRule("Bash(rm -rf /)", "deny")], "rm -rf /tmp");
+        const result = checkBashPermissions(
+            [makeRule("Bash(rm -rf /)", "deny")],
+            "rm -rf /tmp"
+        );
         assert.equal(result, undefined);
     });
 
     void it("does not match a prefix of the command", () => {
-        const result = checkBashPermissions([makeRule("Bash(rm)", "deny")], "rm -rf /");
+        const result = checkBashPermissions(
+            [makeRule("Bash(rm)", "deny")],
+            "rm -rf /"
+        );
         assert.equal(result, undefined);
     });
 
     void it("does not match when extra flags differ", () => {
-        const result = checkBashPermissions([makeRule("Bash(rm -rf /)", "deny")], "rm -f /");
+        const result = checkBashPermissions(
+            [makeRule("Bash(rm -rf /)", "deny")],
+            "rm -f /"
+        );
         assert.equal(result, undefined);
     });
 
     void it("matches as an allow rule", () => {
-        const result = checkBashPermissions([makeRule("Bash(git status)", "allow")], "git status");
+        const result = checkBashPermissions(
+            [makeRule("Bash(git status)", "allow")],
+            "git status"
+        );
         assert.equal(result?.decision, "allow");
     });
 });
@@ -90,7 +115,10 @@ void describe("exact match", () => {
 
 void describe("prefix match (:*)", () => {
     void it("matches the exact prefix", () => {
-        const result = checkBashPermissions([makeRule("Bash(git:*)", "allow")], "git");
+        const result = checkBashPermissions(
+            [makeRule("Bash(git:*)", "allow")],
+            "git"
+        );
         assert.equal(result?.decision, "allow");
     });
 
@@ -103,12 +131,18 @@ void describe("prefix match (:*)", () => {
     });
 
     void it("does not match a different command starting with same letters", () => {
-        const result = checkBashPermissions([makeRule("Bash(ls:*)", "allow")], "lsof");
+        const result = checkBashPermissions(
+            [makeRule("Bash(ls:*)", "allow")],
+            "lsof"
+        );
         assert.equal(result, undefined);
     });
 
     void it("does not match lsattr when rule is ls:*", () => {
-        const result = checkBashPermissions([makeRule("Bash(ls:*)", "allow")], "lsattr");
+        const result = checkBashPermissions(
+            [makeRule("Bash(ls:*)", "allow")],
+            "lsattr"
+        );
         assert.equal(result, undefined);
     });
 
@@ -145,26 +179,41 @@ void describe("wildcard match — anchoring", () => {
     const denyRule = makeRule("Bash(*rm* /)");
 
     void it("matches 'rm -rf /'", () => {
-        assert.equal(checkBashPermissions([denyRule], "rm -rf /")?.decision, "deny");
+        assert.equal(
+            checkBashPermissions([denyRule], "rm -rf /")?.decision,
+            "deny"
+        );
     });
 
     void it("matches 'rm /'", () => {
-        assert.equal(checkBashPermissions([denyRule], "rm /")?.decision, "deny");
+        assert.equal(
+            checkBashPermissions([denyRule], "rm /")?.decision,
+            "deny"
+        );
     });
 
     void it("does not match 'rm -rf /tmp' (does not end with ' /')", () => {
-        assert.equal(checkBashPermissions([denyRule], "rm -rf /tmp"), undefined);
+        assert.equal(
+            checkBashPermissions([denyRule], "rm -rf /tmp"),
+            undefined
+        );
     });
 
     void it("does not match 'biome format --write /tmp/file' (rm is substring of format)", () => {
         assert.equal(
-            checkBashPermissions([denyRule], "biome format --write /tmp/file.js"),
+            checkBashPermissions(
+                [denyRule],
+                "biome format --write /tmp/file.js"
+            ),
             undefined
         );
     });
 
     void it("does not match 'transform data /input' (rm is substring of transform)", () => {
-        assert.equal(checkBashPermissions([denyRule], "transform data /input"), undefined);
+        assert.equal(
+            checkBashPermissions([denyRule], "transform data /input"),
+            undefined
+        );
     });
 });
 
@@ -173,14 +222,16 @@ void describe("wildcard match — no-preserve-root", () => {
 
     void it("matches 'rm --no-preserve-root /'", () => {
         assert.equal(
-            checkBashPermissions([denyRule], "rm --no-preserve-root /")?.decision,
+            checkBashPermissions([denyRule], "rm --no-preserve-root /")
+                ?.decision,
             "deny"
         );
     });
 
     void it("matches 'rm -rf --no-preserve-root /'", () => {
         assert.equal(
-            checkBashPermissions([denyRule], "rm -rf --no-preserve-root /")?.decision,
+            checkBashPermissions([denyRule], "rm -rf --no-preserve-root /")
+                ?.decision,
             "deny"
         );
     });
@@ -201,7 +252,10 @@ void describe("wildcard match — sudo *rm*", () => {
     });
 
     void it("does not match 'rm -rf /tmp' (no sudo)", () => {
-        assert.equal(checkBashPermissions([denyRule], "rm -rf /tmp"), undefined);
+        assert.equal(
+            checkBashPermissions([denyRule], "rm -rf /tmp"),
+            undefined
+        );
     });
 });
 
@@ -209,7 +263,10 @@ void describe("wildcard match — git add -A*", () => {
     const denyRule = makeRule("Bash(git add -A*)");
 
     void it("matches 'git add -A'", () => {
-        assert.equal(checkBashPermissions([denyRule], "git add -A")?.decision, "deny");
+        assert.equal(
+            checkBashPermissions([denyRule], "git add -A")?.decision,
+            "deny"
+        );
     });
 
     void it("matches 'git add -A --force'", () => {
@@ -220,7 +277,10 @@ void describe("wildcard match — git add -A*", () => {
     });
 
     void it("does not match 'git add file.txt'", () => {
-        assert.equal(checkBashPermissions([denyRule], "git add file.txt"), undefined);
+        assert.equal(
+            checkBashPermissions([denyRule], "git add file.txt"),
+            undefined
+        );
     });
 });
 
@@ -240,7 +300,10 @@ void describe("wildcard match — git add . *", () => {
     });
 
     void it("does not match 'git add src/'", () => {
-        assert.equal(checkBashPermissions([denyRule], "git add src/"), undefined);
+        assert.equal(
+            checkBashPermissions([denyRule], "git add src/"),
+            undefined
+        );
     });
 });
 
@@ -251,30 +314,45 @@ void describe("wildcard match — git add . *", () => {
 void describe("escaping — dot is literal", () => {
     void it(". in pattern matches a literal dot, not any character", () => {
         const rule = makeRule("Bash(git commit.*--no-verify)", "ask");
-        assert.equal(checkBashPermissions([rule], "git commit.--no-verify")?.decision, "ask");
+        assert.equal(
+            checkBashPermissions([rule], "git commit.--no-verify")?.decision,
+            "ask"
+        );
     });
 
     void it(". does not match a space", () => {
         const rule = makeRule("Bash(git commit.*--no-verify)", "ask");
-        assert.equal(checkBashPermissions([rule], "git commit --no-verify"), undefined);
+        assert.equal(
+            checkBashPermissions([rule], "git commit --no-verify"),
+            undefined
+        );
     });
 
     void it(". does not match arbitrary characters", () => {
         const rule = makeRule("Bash(git commit.*--no-verify)", "ask");
-        assert.equal(checkBashPermissions([rule], "git commitX--no-verify"), undefined);
+        assert.equal(
+            checkBashPermissions([rule], "git commitX--no-verify"),
+            undefined
+        );
     });
 });
 
 void describe("escaping — regex metacharacters are literal", () => {
     void it("$ in pattern is literal", () => {
-        const rule = makeRule('Bash(echo $HOME)', "deny");
-        assert.equal(checkBashPermissions([rule], 'echo $HOME')?.decision, "deny");
+        const rule = makeRule("Bash(echo $HOME)", "deny");
+        assert.equal(
+            checkBashPermissions([rule], "echo $HOME")?.decision,
+            "deny"
+        );
         assert.equal(checkBashPermissions([rule], "echo HOME"), undefined);
     });
 
     void it("parentheses in pattern are literal", () => {
         const rule = makeRule("Bash(echo (hi))", "deny");
-        assert.equal(checkBashPermissions([rule], "echo (hi)")?.decision, "deny");
+        assert.equal(
+            checkBashPermissions([rule], "echo (hi)")?.decision,
+            "deny"
+        );
     });
 
     void it("square brackets in pattern are literal", () => {
@@ -306,11 +384,17 @@ void describe("ruleMatches — prefix pattern with subcommands", () => {
     const rule = makeRule("Bash(git:*)", "allow");
 
     void it("matches a subcommand that starts with the prefix", () => {
-        assert.equal(ruleMatches(rule, "Bash", "git status", ["git status"]), true);
+        assert.equal(
+            ruleMatches(rule, "Bash", "git status", ["git status"]),
+            true
+        );
     });
 
     void it("does not match when no subcommand matches", () => {
-        assert.equal(ruleMatches(rule, "Bash", "npm install", ["npm install"]), false);
+        assert.equal(
+            ruleMatches(rule, "Bash", "npm install", ["npm install"]),
+            false
+        );
     });
 });
 
@@ -320,7 +404,10 @@ void describe("ruleMatches — wildcard pattern with subcommands", () => {
     void it("checks each subcommand individually", () => {
         // "echo hello && rm file" — subcommands: ["echo hello", "rm file"]
         assert.equal(
-            ruleMatches(rule, "Bash", "echo hello && rm file", ["echo hello", "rm file"]),
+            ruleMatches(rule, "Bash", "echo hello && rm file", [
+                "echo hello",
+                "rm file",
+            ]),
             true
         );
     });
@@ -337,7 +424,10 @@ void describe("ruleMatches — wildcard pattern with subcommands", () => {
         // wildcard patterns are checked per-subcommand, not against the full string.
         // Actually, when subcommands are provided, it ONLY checks subcommands.
         assert.equal(
-            ruleMatches(rule, "Bash", "echo hello && rm file", ["echo hello", "rm file"]),
+            ruleMatches(rule, "Bash", "echo hello && rm file", [
+                "echo hello",
+                "rm file",
+            ]),
             true // "rm file" subcommand matches
         );
     });
@@ -411,7 +501,10 @@ void describe("subcommand splitting", () => {
 void describe("wrapper stripping before matching", () => {
     void it("strips 'timeout N' prefix before deny matching", () => {
         const rules = [makeRule("Bash(rm:*)", "deny")];
-        const result = checkBashPermissions(rules, "timeout 10 rm -rf /tmp/cache");
+        const result = checkBashPermissions(
+            rules,
+            "timeout 10 rm -rf /tmp/cache"
+        );
         assert.equal(result?.decision, "deny");
     });
 
@@ -429,19 +522,28 @@ void describe("wrapper stripping before matching", () => {
 
     void it("strips safe env vars before deny matching", () => {
         const rules = [makeRule("Bash(rm:*)", "deny")];
-        const result = checkBashPermissions(rules, "NODE_ENV=prod rm -rf /tmp/cache");
+        const result = checkBashPermissions(
+            rules,
+            "NODE_ENV=prod rm -rf /tmp/cache"
+        );
         assert.equal(result?.decision, "deny");
     });
 
     void it("strips safe env vars for allow matching", () => {
         const rules = [makeRule("Bash(npm install:*)", "allow")];
-        const result = checkBashPermissions(rules, "NODE_ENV=prod npm install foo");
+        const result = checkBashPermissions(
+            rules,
+            "NODE_ENV=prod npm install foo"
+        );
         assert.equal(result?.decision, "allow");
     });
 
     void it("strips timeout for allow matching", () => {
         const rules = [makeRule("Bash(npm install:*)", "allow")];
-        const result = checkBashPermissions(rules, "timeout 60 npm install foo");
+        const result = checkBashPermissions(
+            rules,
+            "timeout 60 npm install foo"
+        );
         assert.equal(result?.decision, "allow");
     });
 });
@@ -538,11 +640,17 @@ void describe("splitCommand", () => {
 
 void describe("stripSafeWrappers", () => {
     void it("strips timeout prefix", () => {
-        assert.equal(stripSafeWrappers("timeout 10 npm install"), "npm install");
+        assert.equal(
+            stripSafeWrappers("timeout 10 npm install"),
+            "npm install"
+        );
     });
 
     void it("strips timeout with flags", () => {
-        assert.equal(stripSafeWrappers("timeout -v 10 npm install"), "npm install");
+        assert.equal(
+            stripSafeWrappers("timeout -v 10 npm install"),
+            "npm install"
+        );
     });
 
     void it("strips nohup prefix", () => {
@@ -554,15 +662,24 @@ void describe("stripSafeWrappers", () => {
     });
 
     void it("strips nice -n 10 prefix", () => {
-        assert.equal(stripSafeWrappers("nice -n 10 npm install"), "npm install");
+        assert.equal(
+            stripSafeWrappers("nice -n 10 npm install"),
+            "npm install"
+        );
     });
 
     void it("strips NODE_ENV prefix", () => {
-        assert.equal(stripSafeWrappers("NODE_ENV=prod npm install"), "npm install");
+        assert.equal(
+            stripSafeWrappers("NODE_ENV=prod npm install"),
+            "npm install"
+        );
     });
 
     void it("does not strip PATH prefix (unsafe)", () => {
-        assert.equal(stripSafeWrappers("PATH=/evil npm install"), "PATH=/evil npm install");
+        assert.equal(
+            stripSafeWrappers("PATH=/evil npm install"),
+            "PATH=/evil npm install"
+        );
     });
 
     void it("strips combined env var and wrapper", () => {
@@ -587,9 +704,6 @@ void describe("stripAllEnvVars", () => {
     });
 
     void it("strips env vars and wrappers together", () => {
-        assert.equal(
-            stripAllEnvVars("FOO=bar timeout 5 rm file"),
-            "rm file"
-        );
+        assert.equal(stripAllEnvVars("FOO=bar timeout 5 rm file"), "rm file");
     });
 });
