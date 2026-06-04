@@ -5,7 +5,7 @@
  * output for inclusion in tool results.
  */
 
-import type { Page } from "playwright-core";
+import type { Page } from "patchright";
 
 export interface ConsoleMessage {
     readonly type: "log" | "warn" | "error" | "info" | "debug";

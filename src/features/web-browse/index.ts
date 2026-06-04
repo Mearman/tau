@@ -3,7 +3,7 @@
  *
  * Browser modes:
  *   - bridge     (Chrome extension, no prompts) — default for chrome_list
- *   - isolated   (fresh headless Chromium per call) — requires playwright-core, default for browse/screenshot/interact
+ *   - isolated   (fresh headless Chromium per call) — requires patchright, default for browse/screenshot/interact
  *   - cdp        (connect to running Chrome via DevTools Protocol)
  *   - applescript (read-only queries on macOS Chrome via AppleScript)
  *
@@ -17,8 +17,11 @@
  *   - web_screenshot Capture full-page or viewport screenshots
  *   - web_interact   Multi-step interaction (click, fill, scroll, etc.)
  *
- * Playwright-core is an optional dependency — only needed for isolated
- * and CDP modes. Bridge and AppleScript modes work without it.
+ * Patchright (a patched Playwright fork that removes CDP-leak signals) is
+ * an optional dependency — only needed for isolated and CDP modes. Bridge
+ * and AppleScript modes work without it. When CloakBrowser is also
+ * installed, the isolated mode uses its C++-patched Chromium binary for
+ * source-level fingerprint resistance.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -37,22 +40,58 @@ declare global {
     }
 }
 
-// Lazy-loaded playwright-core (optional dependency)
-type PlaywrightBrowser = import("playwright-core").Browser;
-type PlaywrightPage = import("playwright-core").Page;
+// Lazy-loaded patchright (optional dependency — patched Playwright fork
+// that removes CDP-leak signals from the automation protocol handshake).
+type PlaywrightBrowser = import("patchright").Browser;
+type PlaywrightPage = import("patchright").Page;
 
-let _playwrightCore: typeof import("playwright-core") | undefined;
-async function getPlaywright(): Promise<typeof import("playwright-core")> {
-    if (_playwrightCore) return _playwrightCore;
+let _patchright: typeof import("patchright") | undefined;
+async function getPlaywright(): Promise<typeof import("patchright")> {
+    if (_patchright) return _patchright;
     try {
-        _playwrightCore = await import("playwright-core");
-        return _playwrightCore;
+        _patchright = await import("patchright");
+        return _patchright;
     } catch {
         throw new Error(
-            "playwright-core is not installed. Install it with:\n" +
-                "  cd ~/.pi/agent/extensions/tau && pnpm add playwright-core\n" +
-                "\nAlternatively, use browser: 'bridge' or browser: 'applescript' which don't require playwright."
+            "patchright is not installed. Install it with:\n" +
+                "  cd ~/.pi/agent/extensions/tau && pnpm add patchright\n" +
+                "\nAlternatively, use browser: 'bridge' or browser: 'applescript' which don't require it."
         );
+    }
+}
+
+// Lazy-loaded CloakBrowser (optional — provides a C++-patched Chromium
+// binary with source-level fingerprint resistance). When available, the
+// isolated browser mode uses its binary instead of vanilla Chromium,
+// combining CloakBrowser's C++ stealth patches with Patchright's
+// protocol-level patches.
+let _cloakBinaryPath: string | undefined;
+
+async function getCloakBinaryPath(): Promise<string | undefined> {
+    if (_cloakBinaryPath !== undefined) return _cloakBinaryPath;
+    try {
+        const { ensureBinary } = await import("cloakbrowser");
+        const path = await ensureBinary();
+        if (typeof path === "string" && path) {
+            _cloakBinaryPath = path;
+            return _cloakBinaryPath;
+        }
+    } catch {
+        // CloakBrowser not installed — fall back to Patchright's Chromium
+    }
+    return undefined;
+}
+
+let _cloakStealthArgs: string[] | undefined;
+
+async function getCloakStealthArgs(): Promise<string[]> {
+    if (_cloakStealthArgs) return _cloakStealthArgs;
+    try {
+        const { getDefaultStealthArgs } = await import("cloakbrowser");
+        _cloakStealthArgs = getDefaultStealthArgs();
+        return _cloakStealthArgs;
+    } catch {
+        return [];
     }
 }
 
@@ -130,6 +169,20 @@ const SESSION_PARAM = Type.Optional(
 
 async function launchBrowser(): Promise<PlaywrightBrowser> {
     const pw = await getPlaywright();
+    const cloakPath = await getCloakBinaryPath();
+
+    if (cloakPath) {
+        // CloakBrowser binary + Patchright protocol patches: C++ fingerprint
+        // resistance combined with a clean CDP handshake.
+        const stealthArgs = await getCloakStealthArgs();
+        return pw.chromium.launch({
+            headless: true,
+            executablePath: cloakPath,
+            args: stealthArgs,
+        });
+    }
+
+    // Patchright only — protocol-level patches, standard Chromium binary.
     return pw.chromium.launch({ headless: true });
 }
 
@@ -150,9 +203,16 @@ async function createPage(browser: PlaywrightBrowser): Promise<PlaywrightPage> {
         }
     });
 
-    await page.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    // navigator.webdriver shim — redundant when CloakBrowser's C++ patches
+    // already hide it at the binary level. Kept as fallback for vanilla
+    // Chromium via Patchright.
+    if (!_cloakBinaryPath) {
+        await page.addInitScript(() => {
+            Object.defineProperty(navigator, "webdriver", {
+                get: () => false,
+            });
+        });
+    }
     await page.addInitScript({ content: MARKDOWN_INIT });
     await page.addInitScript({ content: STRUCTURE_INIT });
     page.setDefaultTimeout(TIMEOUT);

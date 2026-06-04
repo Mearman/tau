@@ -18,22 +18,20 @@
  * Chrome is never closed by this module — only the Playwright connection is dropped.
  */
 
-import type { Browser, Page } from "playwright-core";
+import type { Browser, Page } from "patchright";
 
-// Dynamic import — playwright-core is an optional dependency
-let chromium: typeof import("playwright-core").chromium | undefined;
-async function getChromium(): Promise<
-    typeof import("playwright-core").chromium
-> {
+// Dynamic import — patchright is an optional dependency
+let chromium: typeof import("patchright").chromium | undefined;
+async function getChromium(): Promise<typeof import("patchright").chromium> {
     if (chromium) return chromium;
     try {
-        const pw = await import("playwright-core");
+        const pw = await import("patchright");
         chromium = pw.chromium;
         return chromium;
     } catch {
         throw new Error(
-            "playwright-core is not installed. Install it with:\n" +
-                "  cd ~/.pi/agent/extensions/tau && pnpm add playwright-core"
+            "patchright is not installed. Install it with:\n" +
+                "  cd ~/.pi/agent/extensions/tau && pnpm add patchright"
         );
     }
 }
@@ -347,7 +345,7 @@ async function resolveBrowserContextProfiles(): Promise<Map<Page, string>> {
         if (contexts.length === 0) return result;
 
         // Find a page with a CDP session
-        let cdpSession: import("playwright-core").CDPSession | null = null;
+        let cdpSession: import("patchright").CDPSession | null = null;
         for (const ctx of contexts) {
             for (const page of ctx.pages()) {
                 try {

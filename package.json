@@ -71,8 +71,12 @@
       "yargs": "^18.0.0"
     }
   },
+  "packageManager": "pnpm@10.33.1",
   "optionalDependencies": {
-    "playwright-core": "1.60.0"
+    "cloakbrowser": "0.3.29",
+    "patchright": "1.60.0"
   },
-  "packageManager": "pnpm@10.33.1"
+  "dependencies": {
+    "playwright-core": "1.60.0"
+  }
 }
