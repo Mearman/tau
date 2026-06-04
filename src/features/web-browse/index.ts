@@ -65,21 +65,82 @@ async function getPlaywright(): Promise<typeof import("patchright")> {
 // isolated browser mode uses its binary instead of vanilla Chromium,
 // combining CloakBrowser's C++ stealth patches with Patchright's
 // protocol-level patches.
+//
+// If CloakBrowser is not installed, it is installed automatically on
+// first use of isolated mode. The npm package (~5 MB) and the stealth
+// Chromium binary (~140 MB) are downloaded once and cached at
+// ~/.cloakbrowser/.
 let _cloakBinaryPath: string | undefined;
+let _cloakInstallAttempted = false;
 
-async function getCloakBinaryPath(): Promise<string | undefined> {
-    if (_cloakBinaryPath !== undefined) return _cloakBinaryPath;
+/** Resolve the tau extension root directory for running pnpm. */
+function getExtensionDir(): string {
+    // src/features/web-browse/index.ts → ../../.. = tau root
+    return join(import.meta.dirname, "..", "..", "..");
+}
+
+/**
+ * Install CloakBrowser via pnpm if it's not already importable.
+ * Returns true if installation succeeded (or was already installed).
+ */
+async function ensureCloakBrowserInstalled(): Promise<boolean> {
+    if (_cloakInstallAttempted) return _cloakBinaryPath !== undefined;
+    _cloakInstallAttempted = true;
+
+    // First check: is it already importable?
     try {
         const { ensureBinary } = await import("cloakbrowser");
         const path = await ensureBinary();
         if (typeof path === "string" && path) {
             _cloakBinaryPath = path;
-            return _cloakBinaryPath;
+            return true;
         }
     } catch {
-        // CloakBrowser not installed — fall back to Patchright's Chromium
+        // Not installed — proceed to install
     }
-    return undefined;
+
+    // Install the npm package
+    const { execFileSync } = await import("node:child_process");
+    const extDir = getExtensionDir();
+
+    try {
+        execFileSync("pnpm", ["add", "-O", "cloakbrowser@0.3.29"], {
+            cwd: extDir,
+            stdio: "pipe",
+            timeout: 60_000,
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+            `[tau] Failed to install CloakBrowser: ${msg}` +
+                "\nFalling back to Patchright-only mode."
+        );
+        return false;
+    }
+
+    // Now import the freshly installed module and download the binary
+    try {
+        const { ensureBinary } = await import("cloakbrowser");
+        const path = await ensureBinary();
+        if (typeof path === "string" && path) {
+            _cloakBinaryPath = path;
+            return true;
+        }
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+            `[tau] CloakBrowser installed but binary download failed: ${msg}` +
+                "\nFalling back to Patchright-only mode."
+        );
+    }
+
+    return false;
+}
+
+async function getCloakBinaryPath(): Promise<string | undefined> {
+    if (_cloakBinaryPath !== undefined) return _cloakBinaryPath;
+    await ensureCloakBrowserInstalled();
+    return _cloakBinaryPath;
 }
 
 let _cloakStealthArgs: string[] | undefined;
