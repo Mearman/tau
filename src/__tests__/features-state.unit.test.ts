@@ -39,7 +39,7 @@ function makeCtx(
         sessionManager: {
             getBranch: () => branch,
         },
-    } as unknown as Parameters<typeof restoreFeaturesState>[2];
+    } as unknown as Parameters<typeof restoreFeaturesState>[1];
 }
 
 void describe("restoreFeaturesState", () => {

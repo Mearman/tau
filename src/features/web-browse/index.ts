@@ -405,6 +405,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             text: "Web browsing is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
             const mode = params.browser ?? "bridge";
@@ -592,6 +593,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             text: "Web browsing is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
             const browserMode = params.browser ?? "isolated";
@@ -659,71 +661,6 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         };
                     }
 
-<<<<<<< HEAD
-                if (format === "markdown") {
-                    await bridge.injectConverters(tabId, socketPath);
-                    const md = await bridge.evaluate(
-                        tabId,
-                        "window.__domToMarkdown()",
-                        socketPath
-                    );
-                    return {
-                        content: [{ type: "text", text: String(md) }],
-                        details: {
-                            format: "markdown",
-                            browser: "bridge",
-                            tabId: tabId,
-                            session,
-                        },
-                    };
-                }
-
-                if (format === "structure") {
-                    await bridge.injectConverters(tabId, socketPath);
-
-                    // GitHub-aware: shallow-clone repo instead of DOM walk
-                    const gh = matchGitHubRepo(params.url);
-                    if (gh) {
-                        try {
-                            const repoData = extractRepoStructure(
-                                gh.owner,
-                                gh.repo
-                            );
-                            return {
-                                content: [
-                                    {
-                                        type: "text",
-                                        text: JSON.stringify(repoData, null, 2),
-                                    },
-                                ],
-                                details: {
-                                    format: "github-repo",
-                                    browser: "bridge",
-                                    tabId: tabId,
-                                    session,
-                                },
-                            };
-                        } catch {
-                            // Clone failed — fall through to DOM extraction
-                        }
-                    }
-
-                    const data = await bridge.evaluate(
-                        tabId,
-                        "JSON.stringify(window.__domToStructure())",
-                        socketPath
-                    );
-                    return {
-                        content: [{ type: "text", text: String(data) }],
-                        details: {
-                            format: "structure",
-                            browser: "bridge",
-                            tabId: tabId,
-                            session,
-                        },
-                    };
-                }
-=======
                     if (format === "markdown") {
                         await bridge.injectConverters(tabId, socketPath);
                         const md = await bridge.evaluate(
@@ -790,7 +727,6 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             },
                         };
                     }
->>>>>>> 90dcc6e (style(web-browse): fix indentation after merge)
 
                     throw new Error(`Unknown format: ${String(format)}`);
                 } finally {
@@ -821,7 +757,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: {
                         format,
                         browser: "applescript",
-                        tabId: params.tabId,
+                        tabId: params.tabId ?? 0,
                         consoleErrors: 0,
                     },
                 };
@@ -916,6 +852,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             text: "Web browsing is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
             const browserMode = params.browser ?? "isolated";
@@ -1046,8 +983,9 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         path,
                         url: page.url(),
                         browser: "cdp",
-                        tabId: params.tabId,
+                        tabId: params.tabId ?? 0,
                         consoleErrors: 0,
+                        session: undefined,
                     },
                 };
             }
@@ -1091,8 +1029,9 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         path,
                         url: params.url,
                         browser: "isolated",
-                        tabId: params.tabId,
+                        tabId: params.tabId ?? 0,
                         consoleErrors: errorCount,
+                        session: undefined,
                     },
                 };
             } finally {
@@ -1205,6 +1144,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             text: "Web browsing is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
             const browserMode = params.browser ?? "isolated";
@@ -1492,10 +1432,11 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         actionCount: params.actions.length,
                         returnFormat,
                         browser: "cdp",
-                        tabId: params.tabId,
+                        tabId: params.tabId ?? 0,
                         consoleErrors: consoleCollector.messages.filter(
                             (m) => m.type === "error"
                         ).length,
+                        session: undefined,
                     },
                 };
             }
@@ -1533,10 +1474,11 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         actionCount: params.actions.length,
                         returnFormat,
                         browser: "isolated",
-                        tabId: params.tabId,
+                        tabId: params.tabId ?? 0,
                         consoleErrors: consoleCollector.messages.filter(
                             (m) => m.type === "error"
                         ).length,
+                        session: undefined,
                     },
                 };
             } finally {

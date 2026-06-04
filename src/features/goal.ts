@@ -26,6 +26,45 @@ import type { TauState } from "../state.ts";
 import { isFeatureEnabled } from "./features-helpers.ts";
 import type { GoalState } from "../types.ts";
 
+/** Type guard: check if a session entry is a custom entry with a specific customType. */
+function isCustomEntry(
+    entry: { type: string; customType?: string },
+    customType: string
+): entry is {
+    type: "custom";
+    customType: string;
+    data?: unknown;
+} {
+    return entry.type === "custom" && entry.customType === customType;
+}
+
+/** Type guard: validate GoalState shape from unknown session entry data. */
+function isGoalStateData(value: unknown): value is GoalState {
+    if (typeof value !== "object" || value === null) return false;
+    if (!("condition" in value)) return false;
+    return typeof value.condition === "string";
+}
+
+/** Type guard: check if a message-like value is an assistant message with array content. */
+function isAssistantMessage(
+    msg: unknown
+): msg is { role: string; content: unknown[]; stopReason?: unknown } {
+    if (typeof msg !== "object" || msg === null) return false;
+    if (!("role" in msg) || !("content" in msg)) return false;
+    return (
+        typeof msg.role === "string" &&
+        msg.role === "assistant" &&
+        Array.isArray(msg.content)
+    );
+}
+
+/** Narrow unknown content to an array of typed parts. */
+function isTypedPart(value: unknown): value is { type: string } {
+    if (typeof value !== "object" || value === null) return false;
+    if (!("type" in value)) return false;
+    return typeof value.type === "string";
+}
+
 // ─── Completion detection ───────────────────────────────────────────
 
 /**
@@ -94,8 +133,10 @@ function extractText(content: unknown): string {
                 typeof b === "object" &&
                 b !== null &&
                 "type" in b &&
-                (b as { type: string }).type === "text" &&
-                "text" in b
+                typeof b.type === "string" &&
+                b.type === "text" &&
+                "text" in b &&
+                typeof b.text === "string"
         )
         .map((b) => b.text)
         .join(" ");
@@ -108,12 +149,9 @@ export function registerGoal(pi: ExtensionAPI, state: TauState): void {
     // (not all entries) so switching branches picks up the correct goal.
     pi.on("session_start", async (_event, ctx) => {
         for (const entry of ctx.sessionManager.getBranch()) {
-            if (
-                entry.type === "custom" &&
-                entry.customType === "tau-goal-state"
-            ) {
-                const data = entry.data as GoalState | undefined;
-                if (data?.condition) {
+            if (isCustomEntry(entry, "tau-goal-state")) {
+                const data = entry.data;
+                if (data && isGoalStateData(data) && data.condition) {
                     state.activeGoal = { ...data };
                 } else {
                     // Cleared goal entry — reset
@@ -180,16 +218,15 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
             | undefined;
 
         for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i] as Record<string, unknown>;
-            if (
-                msg.role === "assistant" &&
-                "content" in msg &&
-                Array.isArray(msg.content)
-            ) {
+            const msg = messages[i];
+            if (isAssistantMessage(msg)) {
                 lastAssistant = {
                     role: msg.role,
                     content: msg.content,
-                    stopReason: msg.stopReason as string | undefined,
+                    stopReason:
+                        typeof msg.stopReason === "string"
+                            ? msg.stopReason
+                            : undefined,
                 };
                 break;
             }
@@ -198,10 +235,12 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
 
         // If the assistant made tool calls, the normal tool loop handles
         // continuation — the agent hasn't actually tried to stop yet.
-        const content = lastAssistant.content as Array<{ type: string }>;
-        const hasToolCalls = content.some(
-            (part: { type: string }) => part.type === "toolCall"
-        );
+        const content = lastAssistant.content;
+        const hasToolCalls =
+            Array.isArray(content) &&
+            content
+                .filter(isTypedPart)
+                .some((part) => part.type === "toolCall");
         if (hasToolCalls) return;
 
         // Only act on clean stops (the agent chose to stop, not aborted)
@@ -217,7 +256,7 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
             state.activeGoal = undefined;
             pi.appendEntry("tau-goal-state", {});
             updateGoalStatus(state, ctx);
-            ctx.ui.notify(`Goal achieved: ${condition}`, "success");
+            ctx.ui.notify(`Goal achieved: ${condition}`, "info");
             return;
         }
 
@@ -269,7 +308,7 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
                 state.activeGoal = undefined;
                 pi.appendEntry("tau-goal-state", {});
                 updateGoalStatus(state, ctx);
-                ctx.ui.notify(`Goal cleared: ${clearedCondition}`, "success");
+                ctx.ui.notify(`Goal cleared: ${clearedCondition}`, "info");
                 return;
             }
 
@@ -303,10 +342,10 @@ it is genuinely impossible. Keep calling tools each turn — do not idle.
             if (previousGoal) {
                 ctx.ui.notify(
                     `Goal updated: ${trimmed} (was: ${previousGoal})`,
-                    "success"
+                    "info"
                 );
             } else {
-                ctx.ui.notify(`Goal set: ${trimmed}`, "success");
+                ctx.ui.notify(`Goal set: ${trimmed}`, "info");
             }
 
             // Trigger a turn so the agent starts working immediately

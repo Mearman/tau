@@ -401,6 +401,7 @@ export function registerCallbacks(pi: ExtensionAPI, state: TauState): void {
                             text: "Callbacks are disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
 

@@ -70,6 +70,7 @@ export function registerReloadTool(pi: ExtensionAPI, state: TauState): void {
                             text: "Reload is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
 

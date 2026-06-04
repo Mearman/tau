@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+    ExtensionAPI,
+    ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import type { GoalState } from "../types.ts";
 
@@ -89,7 +92,7 @@ function createMockCtx(
             getBranch: () => [],
             getSessionId: () => "test-session",
         },
-    } as unknown;
+    } as unknown as ExtensionContext;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -135,7 +138,7 @@ async function getEventHandler(
 function makeAgentEndEvent(
     assistantMessages: Array<{
         role: string;
-        content: Array<{ type: string; text?: string }>;
+        content: Array<{ type: string; text?: string; name?: string }>;
         stopReason?: string;
     }>
 ) {
@@ -820,7 +823,7 @@ void describe("goal agent_end continuation", () => {
                 followUps[0].text.includes(`turn ${turn}`),
                 `turn ${turn}: message should reference turn number`
             );
-            assert.equal(state.activeGoal.iterations, turn);
+            assert.equal(state.activeGoal?.iterations, turn);
         }
     });
 });

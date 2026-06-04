@@ -4,12 +4,15 @@
  */
 
 import type {
-    AutocompleteItem,
     ExtensionAPI,
     ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
-import { parseTauArgs, getTauCompletions } from "./features-cmd.ts";
+import {
+    parseTauArgs,
+    getTauCompletions,
+    type AutocompleteItem,
+} from "./features-cmd.ts";
 import { showFeaturesTui } from "./features-tui.ts";
 import { isFeatureEnabled, getFeatureSource } from "./features-helpers.ts";
 import { setFeatureOverride, unsetFeatureOverride } from "./features-state.ts";

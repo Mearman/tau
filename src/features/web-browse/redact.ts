@@ -24,6 +24,11 @@
 /** Replacement marker for redacted values. */
 export const REDACTED = "[REDACTED]";
 
+/** Narrow unknown to a plain object record without assertions. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Header names whose values must never reach the model.
  * Matched case-insensitively against JSON keys and as substrings of
@@ -102,12 +107,12 @@ const TEXT_PATTERNS: ReadonlyArray<{
     // Bearer / Basic / Token authentication schemes
     {
         description: "Bearer / Basic / Token auth schemes",
-        pattern: /\b(bearer|basic|token)\s+[A-Za-z0-9\-._~+/]+=*/gi,
+        pattern: /\b(bearer|basic|token)\s+[A-Za-z0-9._~+/]+=*/gi,
     },
     // JSON Web Tokens
     {
         description: "JSON Web Token",
-        pattern: /\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g,
+        pattern: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
     },
     // AWS access key ID
     {
@@ -127,13 +132,13 @@ const TEXT_PATTERNS: ReadonlyArray<{
     // Google API key
     {
         description: "Google API key",
-        pattern: /\bAIza[0-9A-Za-z_\-]{35}\b/g,
+        pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     },
     // Common session cookie names
     {
         description: "Session cookie name/value",
         pattern:
-            /\b(PHPSESSID|JSESSIONID|connect\.sid|__Secure-[A-Za-z0-9_-]+|__Host-[A-Za-z0-9_-]+)\s*=\s*[A-Za-z0-9._\-]+/g,
+            /\b(PHPSESSID|JSESSIONID|connect\.sid|__Secure-[A-Za-z0-9_-]+|__Host-[A-Za-z0-9_-]+)\s*=\s*[A-Za-z0-9._-]+/g,
     },
     // localStorage / sessionStorage assignment (best-effort)
     {
@@ -145,7 +150,7 @@ const TEXT_PATTERNS: ReadonlyArray<{
     {
         description: "Sensitive key=value pair",
         pattern:
-            /\b(api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|csrf[_-]?token|csrf[_-]?nonce|authenticity[_-]?token|api[_-]?secret|auth[_-]?token|auth[_-]?secret|service[_-]?key|private[_-]?key|encryption[_-]?key)\s*[:=]\s*['"]?[A-Za-z0-9._+/=:\-]{8,}['"]?/gi,
+            /\b(api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|csrf[_-]?token|csrf[_-]?nonce|authenticity[_-]?token|api[_-]?secret|auth[_-]?token|auth[_-]?secret|service[_-]?key|private[_-]?key|encryption[_-]?key)\s*[:=]\s*['"]?[A-Za-z0-9._+/=:-]{8,}['"]?/gi,
     },
     // Sensitive URL query parameters
     {
@@ -164,7 +169,7 @@ export function redactText(text: string): string {
     if (text.length === 0) return text;
     let result = text;
     for (const { pattern } of TEXT_PATTERNS) {
-        result = result.replace(pattern, (match, ...groups) => {
+        result = result.replace(pattern, (match, ...groups: unknown[]) => {
             // Patterns that capture header "name" and value, like
             // "(authorization|...): <value>", want the entire match
             // replaced. Patterns that only match a credential-shaped
@@ -195,16 +200,20 @@ export function redactJson(value: unknown): unknown {
 
 function redactValue(value: unknown, seen: WeakSet<object>): unknown {
     if (value === null || value === undefined) return value;
-    const t = typeof value;
-    if (t === "string") return redactText(value);
-    if (t === "number" || t === "boolean" || t === "bigint") return value;
+    if (typeof value === "string") return redactText(value);
+    if (
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        typeof value === "bigint"
+    )
+        return value;
     if (Array.isArray(value)) {
         if (seen.has(value)) return REDACTED;
         seen.add(value);
         return value.map((v) => redactValue(v, seen));
     }
-    if (t === "object") {
-        const obj = value as Record<string, unknown>;
+    if (isRecord(value)) {
+        const obj = value;
         if (seen.has(obj)) return REDACTED;
         seen.add(obj);
         const out: Record<string, unknown> = {};

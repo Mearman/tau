@@ -186,6 +186,7 @@ export function registerAgentBackground(
                             text: "Agent background is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
 

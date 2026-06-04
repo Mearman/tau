@@ -38,7 +38,9 @@ void describe("waitForChildProcess", () => {
         );
 
         const child = new FakeChildProcess();
-        const done = waitForChildProcess(child);
+        const done = waitForChildProcess(
+            child as unknown as import("node:child_process").ChildProcess
+        );
 
         child.emit("exit", 0);
         child.stdout.emit("end");

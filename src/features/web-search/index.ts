@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { TauState } from "../../state.ts";
 import { isFeatureEnabled } from "../features-helpers.ts";
-import { selectProvider } from "./select-provider.ts";
+import { selectProvider, selectProviderByName } from "./select-provider.ts";
 
 /** Default maximum number of search results. */
 const DEFAULT_MAX_RESULTS = 10;
@@ -25,8 +25,11 @@ export function registerWebSearch(pi: ExtensionAPI, state: TauState): void {
         label: "Web Search",
         description:
             "Search the web and return results with titles, URLs, and snippets. " +
-            "Automatically selects the best available provider: Claude (Anthropic API), " +
-            "Brave Search, or DuckDuckGo (zero config). Use this instead of guessing URLs.",
+            "Supports three providers: 'claude' (Anthropic API, requires ANTHROPIC_API_KEY), " +
+            "'brave' (Brave Search, requires BRAVE_SEARCH_API_KEY), " +
+            "'duckduckgo' (HTML scraping, zero config but less reliable). " +
+            "Default is 'auto' which picks the highest-priority available provider. " +
+            "Use this instead of guessing URLs.",
         promptSnippet: "Search the web for information",
         promptGuidelines: [
             "Use web_search when you need to find information but don't have a specific URL.",
@@ -64,7 +67,12 @@ export function registerWebSearch(pi: ExtensionAPI, state: TauState): void {
                             text: "Web search is disabled — run /tau to enable",
                         },
                     ],
-                    details: { query: params.query, provider: "none", resultCount: 0, results: [] },
+                    details: {
+                        query: params.query,
+                        provider: "none",
+                        resultCount: 0,
+                        results: [],
+                    },
                 };
             }
 
@@ -75,9 +83,9 @@ export function registerWebSearch(pi: ExtensionAPI, state: TauState): void {
             );
 
             const provider =
-                params.provider === "auto"
+                params.provider === "auto" || !params.provider
                     ? selectProvider()
-                    : selectProvider();
+                    : selectProviderByName(params.provider);
 
             const results = await provider.search(query, maxResults);
 

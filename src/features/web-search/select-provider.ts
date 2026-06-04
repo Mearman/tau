@@ -1,11 +1,13 @@
 /**
  * Provider selection for the web-search feature.
  *
- * Picks the highest-priority provider whose required environment
- * variable is set. Priority order:
+ * Auto-selection priority (when provider is "auto"):
  *   1. claude     (ANTHROPIC_API_KEY)
  *   2. brave      (BRAVE_SEARCH_API_KEY)
  *   3. duckduckgo (always available, zero config)
+ *
+ * A specific provider can be requested by name. If its required
+ * credentials are not available, an error is thrown.
  */
 
 import type { SearchProvider } from "./types.ts";
@@ -29,4 +31,35 @@ export function selectProvider(): SearchProvider {
         return new BraveSearchProvider();
     }
     return new DuckDuckGoSearchProvider();
+}
+
+/**
+ * Select a specific search provider by name.
+ *
+ * Throws if the requested provider's credentials are not available.
+ */
+export function selectProviderByName(name: string): SearchProvider {
+    switch (name) {
+        case "claude":
+            if (!isClaudeAvailable()) {
+                throw new Error(
+                    "Claude search provider not available. Set ANTHROPIC_API_KEY."
+                );
+            }
+            return new ClaudeSearchProvider();
+        case "brave":
+            if (!process.env.BRAVE_SEARCH_API_KEY) {
+                throw new Error(
+                    "Brave search provider not available. Set BRAVE_SEARCH_API_KEY."
+                );
+            }
+            return new BraveSearchProvider();
+        case "duckduckgo":
+            return new DuckDuckGoSearchProvider();
+        default:
+            throw new Error(
+                `Unknown search provider: ${name}. ` +
+                    "Use 'auto', 'claude', 'brave', or 'duckduckgo'."
+            );
+    }
 }

@@ -26,6 +26,7 @@ const config: UserConfig = {
                 "workflow",
                 "goal",
                 "web-browse",
+                "web-search",
             ],
         ],
     },

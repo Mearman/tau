@@ -1,4 +1,5 @@
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.ts$' | grep -v '\.d\.ts$' || true)
 if [ -n "$STAGED" ]; then
+  node node_modules/.bin/tsc --noEmit
   node node_modules/.bin/eslint --cache --fix $STAGED
 fi

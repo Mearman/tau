@@ -8,7 +8,10 @@
  * `/tau features set <id> on|off --scope <scope>`.
  */
 
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import {
+    getSettingsListTheme,
+    type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import {
     Container,
     SettingsList,
@@ -24,25 +27,7 @@ import { setFeatureOverride } from "./features-state.ts";
  */
 export async function showFeaturesTui(
     state: TauState,
-    ctx: {
-        ui: {
-            custom: (
-                factory: (
-                    tui: unknown,
-                    theme: {
-                        fg: (color: string, text: string) => string;
-                        bold: (text: string) => string;
-                    },
-                    kb: unknown,
-                    done: (result?: unknown) => void
-                ) => {
-                    render: (width: number) => string[];
-                    invalidate: () => void;
-                    handleInput: (data: string) => void;
-                }
-            ) => Promise<void>;
-        };
-    }
+    ctx: ExtensionCommandContext
 ): Promise<void> {
     await ctx.ui.custom((_tui, theme, _kb, done) => {
         const items: SettingItem[] = FEATURE_REGISTRY.map((f) => ({

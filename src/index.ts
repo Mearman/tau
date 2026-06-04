@@ -295,7 +295,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     // Plan-mode: inject context before agent starts
-    pi.on("before_agent_start", async () => {
+    pi.on("before_agent_start", async (_event, ctx) => {
         if (state.permissionMode === "plan" && state.planSlug) {
             const sessionDir = ctx.sessionManager.getSessionDir();
             const planPath = getPlanFilePath(sessionDir, state.planSlug);
@@ -490,8 +490,7 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
             if (planModeEntry.data.enabled) {
                 state.permissionMode = "plan";
             }
-            state.planSlug =
-                planModeEntry.data.planId ?? planModeEntry.data.slug;
+            state.planSlug = planModeEntry.data.slug;
             state.planPreviousMode = planModeEntry.data.previousMode;
         }
 

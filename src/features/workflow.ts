@@ -788,6 +788,7 @@ export function registerWorkflow(pi: ExtensionAPI, state: TauState): void {
                             text: "Workflow is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
 

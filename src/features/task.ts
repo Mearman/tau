@@ -585,6 +585,7 @@ export function registerTask(pi: ExtensionAPI, state: TauState): void {
                             text: "Task management is disabled — run /tau to enable",
                         },
                     ],
+                    details: undefined,
                 };
             }
 
