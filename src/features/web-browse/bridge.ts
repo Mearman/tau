@@ -18,6 +18,7 @@ import { connect, type Socket } from "node:net";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { userInfo } from "node:os";
+import { redactText } from "./redact.ts";
 
 const SOCKET_DIR = `/tmp/pi-chrome-bridge-${getUsername()}`;
 const MAX_MESSAGE_SIZE = 1024 * 1024; // 1 MB
@@ -401,7 +402,7 @@ export async function getTabText(
         tabId,
         selector,
     });
-    return (result as string) ?? "";
+    return redactText((result as string) ?? "");
 }
 
 /** Execute JavaScript in a tab. */
@@ -415,7 +416,7 @@ export async function evaluate(
         tabId,
         expression,
     });
-    return result as string;
+    return redactText(result as string);
 }
 
 /** Navigate a tab to a URL. */
