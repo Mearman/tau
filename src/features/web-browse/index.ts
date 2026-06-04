@@ -64,6 +64,7 @@ import {
 import * as cdp from "./cdp.ts";
 import * as applescript from "./applescript.ts";
 import * as bridge from "./bridge.ts";
+import { matchGitHubRepo, extractRepoStructure } from "./github-structure.ts";
 import type { TauState } from "../../state.ts";
 import { isFeatureEnabled } from "../features-helpers.ts";
 
@@ -513,6 +514,32 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 }
 
                 if (format === "structure") {
+                    // GitHub-aware: shallow-clone repo instead of DOM walk
+                    const gh = matchGitHubRepo(params.url);
+                    if (gh) {
+                        try {
+                            const repoData = extractRepoStructure(
+                                gh.owner,
+                                gh.repo
+                            );
+                            return {
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: JSON.stringify(repoData, null, 2),
+                                    },
+                                ],
+                                details: {
+                                    format: "github-repo",
+                                    browser: "bridge",
+                                    tabId: tabId,
+                                },
+                            };
+                        } catch {
+                            // Clone failed — fall through to DOM extraction
+                        }
+                    }
+
                     const data = await bridge.evaluate(
                         tabId,
                         `(() => { if (typeof window.__domToStructure !== 'function') return { error: 'Converters not injected' }; return window.__domToStructure(); })()`,
@@ -1225,6 +1252,30 @@ async function extractPageContent(
             };
         }
         case "structure": {
+            // GitHub-aware: shallow-clone repo instead of DOM walk
+            const gh = matchGitHubRepo(params.url);
+            if (gh) {
+                try {
+                    const repoData = extractRepoStructure(gh.owner, gh.repo);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify(repoData, null, 2),
+                            },
+                        ],
+                        details: {
+                            format: "github-repo",
+                            url: params.url,
+                            browser: browserMode,
+                            consoleErrors: 0,
+                        },
+                    };
+                } catch {
+                    // Clone failed — fall through to DOM extraction
+                }
+            }
+
             const data: unknown = await page.evaluate(() =>
                 window.__domToStructure()
             );
