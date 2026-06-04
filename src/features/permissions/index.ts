@@ -54,8 +54,10 @@ export interface PermissionState {
     askedCommands: Set<string>;
     /** Override ask prompt timeout for testing. Undefined = use ASK_PROMPT_TIMEOUT_MS. */
     askTimeoutMs?: number;
-    /** Active plan file slug, if in plan mode. Used to allow writes to plan file. */
+    /** Active plan file ID, if in plan mode. Used to allow writes to plan file. */
     planSlug?: string;
+    /** Session directory for resolving plan file paths. */
+    planSessionDir?: string;
 }
 
 // How long to wait for the user to respond to an ask prompt before timing out.
@@ -278,7 +280,11 @@ export async function checkToolPermission(
     if (state.mode === "plan") {
         if (toolName === "Edit" || toolName === "Write") {
             const path = String(getPath(event.input));
-            if (state.planSlug && isPlanFilePath(path, cwd, state.planSlug)) {
+            if (
+                state.planSlug &&
+                state.planSessionDir &&
+                isPlanFilePath(path, state.planSessionDir, state.planSlug)
+            ) {
                 // Allow writes to the plan file
                 return { block: false };
             }
@@ -622,6 +628,7 @@ export async function reloadSettingsIfNeeded(
         sessionRules: state.sessionRules, // preserved across reloads
         askedCommands: state.askedCommands, // preserved across reloads
         planSlug: state.planSlug, // preserved across reloads
+        planSessionDir: state.planSessionDir, // preserved across reloads
     };
 }
 

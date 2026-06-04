@@ -39,6 +39,7 @@ import { registerBackgroundJobs } from "./features/background.ts";
 import { registerBackgroundCommands } from "./features/background-commands.ts";
 import { registerAgentBackground } from "./features/agent-background.ts";
 import { registerPlanMode } from "./features/plan-mode.ts";
+import { getPlanFilePath } from "./features/plan-file.ts";
 import {
     registerTask,
     reconstructTaskState,
@@ -69,6 +70,7 @@ import { registerSessionName } from "./features/session-name.ts";
 import { registerSummarize } from "./features/summarize.ts";
 import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
+import { registerWebSearch } from "./features/web-search/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -107,6 +109,7 @@ export default function (pi: ExtensionAPI) {
     registerSummarize(pi, state);
     registerContext(pi, state);
     registerWebBrowse(pi, state);
+    registerWebSearch(pi, state);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
@@ -160,6 +163,7 @@ export default function (pi: ExtensionAPI) {
                 sessionRules: state.permissionSessionRules,
                 askedCommands: state.permissionAskedCommands,
                 planSlug: state.planSlug,
+                planSessionDir: ctx.sessionManager.getSessionDir(),
             },
             ctx.cwd
         );
@@ -241,7 +245,8 @@ export default function (pi: ExtensionAPI) {
     // Plan-mode: inject context before agent starts
     pi.on("before_agent_start", async () => {
         if (state.permissionMode === "plan" && state.planSlug) {
-            const planPath = `.pi/plans/${state.planSlug}.md`;
+            const sessionDir = ctx.sessionManager.getSessionDir();
+            const planPath = getPlanFilePath(sessionDir, state.planSlug);
             const taskTree =
                 state.tasks.length > 0
                     ? `\n\nCurrent task tree:\n${formatTaskTree(state.tasks)}`
@@ -433,7 +438,8 @@ Existing code to reuse (with paths), and Verification steps.${taskTree}`,
             if (planModeEntry.data.enabled) {
                 state.permissionMode = "plan";
             }
-            state.planSlug = planModeEntry.data.slug;
+            state.planSlug =
+                planModeEntry.data.planId ?? planModeEntry.data.slug;
             state.planPreviousMode = planModeEntry.data.previousMode;
         }
 

@@ -37,7 +37,10 @@ export function slugifyTitle(title: string): string {
  */
 export function planIdFromTitle(title: string): string {
     const now = new Date();
-    const ts = now.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "");
+    const ts = now
+        .toISOString()
+        .replace(/:/g, "-")
+        .replace(/\.\d+Z$/, "");
     const slug = slugifyTitle(title);
     return slug ? `${ts}-${slug}` : ts;
 }
@@ -49,7 +52,10 @@ export function planIdFromTitle(title: string): string {
 export function planIdFromSession(sessionId: string): string {
     const segment = sessionId.split("-")[0] ?? sessionId.slice(0, 8);
     const now = new Date();
-    const ts = now.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "");
+    const ts = now
+        .toISOString()
+        .replace(/:/g, "-")
+        .replace(/\.\d+Z$/, "");
     return `${ts}-${segment}`;
 }
 
@@ -106,7 +112,10 @@ export function createPlanFile(
 /**
  * Read the plan file content. Returns undefined if the file doesn't exist.
  */
-export function readPlanFile(sessionDir: string, planId: string): string | undefined {
+export function readPlanFile(
+    sessionDir: string,
+    planId: string
+): string | undefined {
     const filePath = getPlanFilePath(sessionDir, planId);
     if (!existsSync(filePath)) return undefined;
     return readFileSync(filePath, "utf-8");

@@ -52,7 +52,10 @@ export function togglePlanMode(
     } else {
         const sessionId = ctx.sessionManager.getSessionId();
         const planId = planIdFromSession(sessionId);
-        const planPath = createPlanFile(ctx.sessionManager.getSessionDir(), planId);
+        const planPath = createPlanFile(
+            ctx.sessionManager.getSessionDir(),
+            planId
+        );
 
         state.planPreviousMode = state.permissionMode;
         state.permissionMode = "plan";

@@ -24,7 +24,10 @@ import { tmpdir } from "node:os";
 void describe("plan-file", () => {
     void describe("slugifyTitle", () => {
         void it("lowercases and hyphenates", () => {
-            assert.equal(slugifyTitle("Refactor Auth Module"), "refactor-auth-module");
+            assert.equal(
+                slugifyTitle("Refactor Auth Module"),
+                "refactor-auth-module"
+            );
         });
 
         void it("strips non-alphanumeric characters", () => {
@@ -57,7 +60,9 @@ void describe("plan-file", () => {
 
     void describe("planIdFromSession", () => {
         void it("produces timestamp-uuid-segment format", () => {
-            const id = planIdFromSession("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+            const id = planIdFromSession(
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            );
             assert.ok(id.endsWith("-a1b2c3d4"));
             assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(id));
         });
@@ -72,8 +77,14 @@ void describe("plan-file", () => {
 
     void describe("getPlanFilePath", () => {
         void it("returns plans/{planId}.md under session dir", () => {
-            const filePath = getPlanFilePath("/session/dir", "2026-06-04T12-00-00-refactor");
-            assert.equal(filePath, "/session/dir/plans/2026-06-04T12-00-00-refactor.md");
+            const filePath = getPlanFilePath(
+                "/session/dir",
+                "2026-06-04T12-00-00-refactor"
+            );
+            assert.equal(
+                filePath,
+                "/session/dir/plans/2026-06-04T12-00-00-refactor.md"
+            );
         });
     });
 
@@ -121,7 +132,11 @@ void describe("plan-file", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
                 createPlanFile(tmp, "2026-06-04T12-00-00-test", "First");
-                writePlanFile(tmp, "2026-06-04T12-00-00-test", "Custom content");
+                writePlanFile(
+                    tmp,
+                    "2026-06-04T12-00-00-test",
+                    "Custom content"
+                );
                 createPlanFile(tmp, "2026-06-04T12-00-00-test", "Second");
                 const content = readPlanFile(tmp, "2026-06-04T12-00-00-test");
                 assert.equal(content, "Custom content");
@@ -146,7 +161,11 @@ void describe("plan-file", () => {
         void it("writes content to the plan file", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
-                writePlanFile(tmp, "2026-06-04T12-00-00-test", "# My Plan\n\nContent here.");
+                writePlanFile(
+                    tmp,
+                    "2026-06-04T12-00-00-test",
+                    "# My Plan\n\nContent here."
+                );
                 const content = readPlanFile(tmp, "2026-06-04T12-00-00-test");
                 assert.equal(content, "# My Plan\n\nContent here.");
             } finally {
