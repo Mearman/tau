@@ -19,7 +19,8 @@ import { Text } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
 import { modeStatusText, modeColour } from "./permissions/index.js";
 import {
-    sessionSlug,
+    planIdFromTitle,
+    planIdFromSession,
     createPlanFile,
     getPlanFilePath,
     readPlanFile,
@@ -80,7 +81,8 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
         label: "Enter Plan Mode",
         description:
             "Enter plan mode for read-only codebase exploration and planning. " +
-            "Creates a plan file at .pi/plans/<slug>.md where the plan will be written. " +
+            "Creates a plan file at ~/.pi/agent/sessions/{dir}/plans/{timestamp}-{name}.md " +
+            "where the plan will be written. " +
             "In plan mode, only read tools and the plan file are accessible — no edits or writes. " +
             "Use this when the task is complex enough to warrant structured planning first.",
         parameters: EnterPlanModeParams,
@@ -93,14 +95,15 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             ctx
         ): Promise<AgentToolResult<PlanToolDetails>> {
             const sessionId = ctx.sessionManager.getSessionId();
-            const slug = sessionSlug(sessionId);
-            const title = params.title ?? `Plan ${slug}`;
+            const sessionDir = ctx.sessionManager.getSessionDir();
+            const title = params.title ?? `Plan ${sessionId.slice(0, 8)}`;
+            const planId = planIdFromTitle(title);
 
             // Create plan file
-            const planPath = createPlanFile(ctx.cwd, slug, title);
+            const planPath = createPlanFile(sessionDir, planId, title);
 
             // Store previous mode for restoration
-            state.planSlug = slug;
+            state.planSlug = planId;
             state.planPreviousMode = state.permissionMode;
 
             // Switch to plan mode
@@ -129,7 +132,7 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             // Persist plan state
             pi.appendEntry("plan-mode", {
                 enabled: true,
-                slug,
+                planId,
                 previousMode: state.planPreviousMode,
             });
 
@@ -150,7 +153,7 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
                 details: {
                     action: "enter",
                     planPath,
-                    slug,
+                    planId,
                 },
             };
         },
@@ -194,21 +197,22 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             _onUpdate,
             ctx
         ): Promise<AgentToolResult<PlanToolDetails>> {
-            const slug = state.planSlug;
-            if (!slug) {
+            const planId = state.planSlug;
+            if (!planId) {
                 return {
                     content: [
                         {
                             type: "text",
-                            text: "Error: not in plan mode (no active plan slug).",
+                            text: "Error: not in plan mode (no active plan).",
                         },
                     ],
                     details: { action: "exit", error: "not in plan mode" },
                 };
             }
 
-            const planPath = getPlanFilePath(ctx.cwd, slug);
-            const planContent = readPlanFile(ctx.cwd, slug);
+            const sessionDir = ctx.sessionManager.getSessionDir();
+            const planPath = getPlanFilePath(sessionDir, planId);
+            const planContent = readPlanFile(sessionDir, planId);
 
             // Present plan for review
             const summary = params.summary ?? "Plan is ready for review.";
@@ -281,7 +285,7 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             // Persist state
             pi.appendEntry("plan-mode", {
                 enabled: false,
-                slug,
+                planId,
                 executing: true,
                 executionMode: execMode,
             });
@@ -358,7 +362,8 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             const subcommand = args.trim().toLowerCase();
 
             if (subcommand === "show" && state.planSlug) {
-                const content = readPlanFile(ctx.cwd, state.planSlug);
+                const sessionDir = ctx.sessionManager.getSessionDir();
+                const content = readPlanFile(sessionDir, state.planSlug);
                 if (content) {
                     ctx.ui.notify(content, "info");
                 } else {
@@ -374,10 +379,11 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
             } else {
                 // Enter plan mode
                 const sessionId = ctx.sessionManager.getSessionId();
-                const slug = sessionSlug(sessionId);
-                const planPath = createPlanFile(ctx.cwd, slug);
+                const sessionDir = ctx.sessionManager.getSessionDir();
+                const planId = planIdFromSession(sessionId);
+                const planPath = createPlanFile(sessionDir, planId);
 
-                state.planSlug = slug;
+                state.planSlug = planId;
                 state.planPreviousMode = state.permissionMode;
                 state.permissionMode = "plan";
                 pi.setActiveTools([
@@ -402,7 +408,7 @@ export function registerPlanTools(pi: ExtensionAPI, state: TauState): void {
 
                 pi.appendEntry("plan-mode", {
                     enabled: true,
-                    slug,
+                    planId,
                     previousMode: state.planPreviousMode,
                 });
 
@@ -485,7 +491,7 @@ function cancelPlanMode(
 
     pi.appendEntry("plan-mode", {
         enabled: false,
-        slug: undefined,
+        planId: undefined,
         executing: false,
     });
 }
@@ -495,7 +501,7 @@ function cancelPlanMode(
 interface PlanToolDetails {
     action: "enter" | "exit";
     planPath?: string;
-    slug?: string;
+    planId?: string;
     error?: string;
     rejected?: boolean;
     cancelled?: boolean;

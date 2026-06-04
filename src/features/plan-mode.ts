@@ -17,7 +17,7 @@ import type { TauState } from "../state.ts";
 import { isFeatureEnabled } from "./features-helpers.ts";
 import type { PermissionMode } from "./permissions/types.js";
 import { modeStatusText, modeColour } from "./permissions/index.js";
-import { sessionSlug, createPlanFile } from "./plan-file.ts";
+import { planIdFromSession, createPlanFile } from "./plan-file.ts";
 import { NORMAL_MODE_TOOLS } from "../utils.ts";
 
 function updatePlanStatus(state: TauState, ctx: ExtensionContext): void {
@@ -51,12 +51,12 @@ export function togglePlanMode(
         ctx.ui.notify("Plan mode disabled. Full access restored.");
     } else {
         const sessionId = ctx.sessionManager.getSessionId();
-        const slug = sessionSlug(sessionId);
-        const planPath = createPlanFile(ctx.cwd, slug);
+        const planId = planIdFromSession(sessionId);
+        const planPath = createPlanFile(ctx.sessionManager.getSessionDir(), planId);
 
         state.planPreviousMode = state.permissionMode;
         state.permissionMode = "plan";
-        state.planSlug = slug;
+        state.planSlug = planId;
         pi.setActiveTools([
             "read",
             "bash",
