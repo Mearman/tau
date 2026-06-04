@@ -1,8 +1,10 @@
 /**
  * Plan file management — create, resolve, read, and write plan files.
  *
- * Plan files live at `.pi/plans/<slug>.md` relative to the working directory.
- * The slug is derived from the session ID for unique identification.
+ * Plan files live at `{sessionDir}/plans/{timestamp}-{name}.md` where
+ * `{sessionDir}` is the session manager directory for the current project
+ * (e.g. `~/.pi/agent/sessions/--Users-joe-project--/`) and `{name}` is a
+ * filesystem-safe version of the plan title.
  *
  * During plan mode, only the plan file and task tree are writable.
  * This module provides the path resolution and I/O for plan files.
@@ -13,44 +15,66 @@ import { dirname, join, resolve } from "node:path";
 
 // ─── Plan file location ────────────────────────────────────────────
 
-/** Directory for plan files, relative to cwd */
-const PLANS_DIR = ".pi/plans";
+/** Subdirectory for plan files within a session directory */
+const PLANS_SUBDIR = "plans";
 
 /**
- * Derive a filesystem-safe slug from a session ID.
- *
- * Session IDs are UUIDs like "a1b2c3d4-e5f6-7890-abcd-ef1234567890".
- * We use the first segment as the slug for brevity.
+ * Create a filesystem-safe name from a plan title.
+ * Lowercases, replaces non-alphanumeric sequences with hyphens, trims.
  */
-export function sessionSlug(sessionId: string): string {
-    // Take the first segment of the UUID for a short, unique slug
-    const segment = sessionId.split("-")[0];
-    return segment ?? sessionId.slice(0, 8);
+export function slugifyTitle(title: string): string {
+    return title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 64);
+}
+
+/**
+ * Generate a plan ID (filename stem) from a title.
+ * Format: `{ISO-date}-{slugified-title}`.
+ * If the title produces an empty slug, the date alone is used.
+ */
+export function planIdFromTitle(title: string): string {
+    const now = new Date();
+    const ts = now.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "");
+    const slug = slugifyTitle(title);
+    return slug ? `${ts}-${slug}` : ts;
+}
+
+/**
+ * Derive a plan ID from a session ID (fallback when no title is available).
+ * Uses the first UUID segment prefixed with a timestamp.
+ */
+export function planIdFromSession(sessionId: string): string {
+    const segment = sessionId.split("-")[0] ?? sessionId.slice(0, 8);
+    const now = new Date();
+    const ts = now.toISOString().replace(/:/g, "-").replace(/\.\d+Z$/, "");
+    return `${ts}-${segment}`;
 }
 
 /**
  * Get the plan file directory path (absolute).
+ * Lives at `{sessionDir}/plans/`.
  */
-export function getPlansDir(cwd: string): string {
-    return resolve(cwd, PLANS_DIR);
+export function getPlansDir(sessionDir: string): string {
+    return join(sessionDir, PLANS_SUBDIR);
 }
 
 /**
  * Get the absolute path to a plan file.
- *
- * If `slug` is provided, uses it directly. Otherwise derives from `sessionId`.
- * The file is `<plans-dir>/<slug>.md`.
+ * The file is `{sessionDir}/plans/{planId}.md`.
  */
-export function getPlanFilePath(cwd: string, slug: string): string {
-    return join(getPlansDir(cwd), `${slug}.md`);
+export function getPlanFilePath(sessionDir: string, planId: string): string {
+    return join(getPlansDir(sessionDir), `${planId}.md`);
 }
 
 /**
  * Ensure the plans directory exists, creating it if needed.
  * Returns the directory path.
  */
-export function ensurePlansDir(cwd: string): string {
-    const dir = getPlansDir(cwd);
+export function ensurePlansDir(sessionDir: string): string {
+    const dir = getPlansDir(sessionDir);
     if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
     }
@@ -64,15 +88,15 @@ export function ensurePlansDir(cwd: string): string {
  * If the file already exists, returns its path without modifying it.
  */
 export function createPlanFile(
-    cwd: string,
-    slug: string,
+    sessionDir: string,
+    planId: string,
     title?: string
 ): string {
-    const filePath = getPlanFilePath(cwd, slug);
-    ensurePlansDir(cwd);
+    const filePath = getPlanFilePath(sessionDir, planId);
+    ensurePlansDir(sessionDir);
 
     if (!existsSync(filePath)) {
-        const template = buildPlanTemplate(slug, title);
+        const template = buildPlanTemplate(planId, title);
         writeFileSync(filePath, template, "utf-8");
     }
 
@@ -82,8 +106,8 @@ export function createPlanFile(
 /**
  * Read the plan file content. Returns undefined if the file doesn't exist.
  */
-export function readPlanFile(cwd: string, slug: string): string | undefined {
-    const filePath = getPlanFilePath(cwd, slug);
+export function readPlanFile(sessionDir: string, planId: string): string | undefined {
+    const filePath = getPlanFilePath(sessionDir, planId);
     if (!existsSync(filePath)) return undefined;
     return readFileSync(filePath, "utf-8");
 }
@@ -92,12 +116,12 @@ export function readPlanFile(cwd: string, slug: string): string | undefined {
  * Write content to the plan file. Creates the directory if needed.
  */
 export function writePlanFile(
-    cwd: string,
-    slug: string,
+    sessionDir: string,
+    planId: string,
     content: string
 ): void {
-    ensurePlansDir(cwd);
-    const filePath = getPlanFilePath(cwd, slug);
+    ensurePlansDir(sessionDir);
+    const filePath = getPlanFilePath(sessionDir, planId);
     writeFileSync(filePath, content, "utf-8");
 }
 
@@ -107,10 +131,10 @@ export function writePlanFile(
  */
 export function isPlanFilePath(
     path: string,
-    cwd: string,
-    slug: string
+    sessionDir: string,
+    planId: string
 ): boolean {
-    const planPath = resolve(getPlanFilePath(cwd, slug));
+    const planPath = resolve(getPlanFilePath(sessionDir, planId));
     const resolvedPath = resolve(path);
     return resolvedPath === planPath;
 }
@@ -119,16 +143,16 @@ export function isPlanFilePath(
  * Check whether a given path is inside the plans directory.
  * Less strict than `isPlanFilePath` — used for general plan directory access.
  */
-export function isInPlansDir(path: string, cwd: string): boolean {
-    const plansDir = resolve(getPlansDir(cwd));
+export function isInPlansDir(path: string, sessionDir: string): boolean {
+    const plansDir = resolve(getPlansDir(sessionDir));
     const resolvedPath = resolve(dirname(path));
     return resolvedPath.startsWith(plansDir);
 }
 
 // ─── Plan file template ─────────────────────────────────────────────
 
-function buildPlanTemplate(slug: string, title?: string): string {
-    const planTitle = title ?? `Plan ${slug}`;
+function buildPlanTemplate(planId: string, title?: string): string {
+    const planTitle = title ?? `Plan ${planId}`;
     return `# ${planTitle}
 
 ## Context

@@ -75,7 +75,7 @@ export class TauState {
 
     // ── Plan ──────────────────────────────────────────────────────
 
-    /** Active plan file slug, derived from session ID. Set when plan mode is entered. */
+    /** Active plan file ID (timestamp-title stem), if in plan mode. Set when plan mode is entered. */
     planSlug: string | undefined;
     /** The permission mode that was active before entering plan mode. */
     planPreviousMode: PermissionMode | undefined;

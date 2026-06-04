@@ -5,7 +5,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-    sessionSlug,
+    slugifyTitle,
+    planIdFromTitle,
+    planIdFromSession,
     getPlansDir,
     getPlanFilePath,
     ensurePlansDir,
@@ -20,31 +22,58 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 void describe("plan-file", () => {
-    void describe("sessionSlug", () => {
-        void it("extracts first UUID segment", () => {
-            assert.equal(
-                sessionSlug("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-                "a1b2c3d4"
-            );
+    void describe("slugifyTitle", () => {
+        void it("lowercases and hyphenates", () => {
+            assert.equal(slugifyTitle("Refactor Auth Module"), "refactor-auth-module");
         });
 
-        void it("falls back to first 8 chars for non-UUID input", () => {
-            assert.equal(sessionSlug("short"), "short");
+        void it("strips non-alphanumeric characters", () => {
+            assert.equal(slugifyTitle("Fix bug #123!!!"), "fix-bug-123");
+        });
+
+        void it("trims to 64 characters", () => {
+            const long = "a".repeat(100);
+            assert.equal(slugifyTitle(long).length, 64);
+        });
+
+        void it("returns empty for all-special input", () => {
+            assert.equal(slugifyTitle("!!!"), "");
+        });
+    });
+
+    void describe("planIdFromTitle", () => {
+        void it("produces timestamp-title format", () => {
+            const id = planIdFromTitle("Refactor Auth");
+            assert.ok(id.includes("-refactor-auth"));
+            assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(id));
+        });
+
+        void it("omits title when slug is empty", () => {
+            const id = planIdFromTitle("!!!");
+            assert.ok(!id.endsWith("-"));
+            assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(id));
+        });
+    });
+
+    void describe("planIdFromSession", () => {
+        void it("produces timestamp-uuid-segment format", () => {
+            const id = planIdFromSession("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+            assert.ok(id.endsWith("-a1b2c3d4"));
+            assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(id));
         });
     });
 
     void describe("getPlansDir", () => {
-        void it("returns .pi/plans under cwd", () => {
-            const dir = getPlansDir("/project");
-            assert.ok(dir.endsWith(".pi/plans"));
-            assert.ok(dir.startsWith("/project"));
+        void it("returns plans/ under the session dir", () => {
+            const dir = getPlansDir("/session/dir");
+            assert.equal(dir, "/session/dir/plans");
         });
     });
 
     void describe("getPlanFilePath", () => {
-        void it("returns .pi/plans/<slug>.md under cwd", () => {
-            const filePath = getPlanFilePath("/project", "abc123");
-            assert.equal(filePath, "/project/.pi/plans/abc123.md");
+        void it("returns plans/{planId}.md under session dir", () => {
+            const filePath = getPlanFilePath("/session/dir", "2026-06-04T12-00-00-refactor");
+            assert.equal(filePath, "/session/dir/plans/2026-06-04T12-00-00-refactor.md");
         });
     });
 
@@ -53,7 +82,7 @@ void describe("plan-file", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
                 const dir = ensurePlansDir(tmp);
-                assert.ok(dir.endsWith(".pi/plans"));
+                assert.ok(dir.endsWith("/plans"));
                 assert.ok(existsSync(dir));
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -75,8 +104,8 @@ void describe("plan-file", () => {
         void it("creates a plan file with template", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
-                createPlanFile(tmp, "abc123", "Test Plan");
-                const content = readPlanFile(tmp, "abc123");
+                createPlanFile(tmp, "2026-06-04T12-00-00-test", "Test Plan");
+                const content = readPlanFile(tmp, "2026-06-04T12-00-00-test");
                 assert.ok(content);
                 assert.ok(content.includes("# Test Plan"));
                 assert.ok(content.includes("## Context"));
@@ -91,10 +120,10 @@ void describe("plan-file", () => {
         void it("does not overwrite existing plan file", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
-                createPlanFile(tmp, "abc123", "First");
-                writePlanFile(tmp, "abc123", "Custom content");
-                createPlanFile(tmp, "abc123", "Second");
-                const content = readPlanFile(tmp, "abc123");
+                createPlanFile(tmp, "2026-06-04T12-00-00-test", "First");
+                writePlanFile(tmp, "2026-06-04T12-00-00-test", "Custom content");
+                createPlanFile(tmp, "2026-06-04T12-00-00-test", "Second");
+                const content = readPlanFile(tmp, "2026-06-04T12-00-00-test");
                 assert.equal(content, "Custom content");
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -117,8 +146,8 @@ void describe("plan-file", () => {
         void it("writes content to the plan file", () => {
             const tmp = mkdtempSync(join(tmpdir(), "tau-plan-test-"));
             try {
-                writePlanFile(tmp, "abc123", "# My Plan\n\nContent here.");
-                const content = readPlanFile(tmp, "abc123");
+                writePlanFile(tmp, "2026-06-04T12-00-00-test", "# My Plan\n\nContent here.");
+                const content = readPlanFile(tmp, "2026-06-04T12-00-00-test");
                 assert.equal(content, "# My Plan\n\nContent here.");
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -130,29 +159,29 @@ void describe("plan-file", () => {
         void it("returns true for exact match", () => {
             assert.ok(
                 isPlanFilePath(
-                    "/project/.pi/plans/abc123.md",
-                    "/project",
-                    "abc123"
+                    "/session/dir/plans/2026-06-04T12-00-00-test.md",
+                    "/session/dir",
+                    "2026-06-04T12-00-00-test"
                 )
             );
         });
 
-        void it("returns false for different slug", () => {
+        void it("returns false for different plan ID", () => {
             assert.ok(
                 !isPlanFilePath(
-                    "/project/.pi/plans/other.md",
-                    "/project",
-                    "abc123"
+                    "/session/dir/plans/other.md",
+                    "/session/dir",
+                    "2026-06-04T12-00-00-test"
                 )
             );
         });
 
-        void it("returns false for different directory", () => {
+        void it("returns false for different session dir", () => {
             assert.ok(
                 !isPlanFilePath(
-                    "/other/.pi/plans/abc123.md",
-                    "/project",
-                    "abc123"
+                    "/other/dir/plans/2026-06-04T12-00-00-test.md",
+                    "/session/dir",
+                    "2026-06-04T12-00-00-test"
                 )
             );
         });
@@ -161,12 +190,12 @@ void describe("plan-file", () => {
     void describe("isInPlansDir", () => {
         void it("returns true for any file in plans directory", () => {
             assert.ok(
-                isInPlansDir("/project/.pi/plans/anything.md", "/project")
+                isInPlansDir("/session/dir/plans/anything.md", "/session/dir")
             );
         });
 
         void it("returns false for file outside plans directory", () => {
-            assert.ok(!isInPlansDir("/project/src/foo.ts", "/project"));
+            assert.ok(!isInPlansDir("/session/dir/src/foo.ts", "/session/dir"));
         });
     });
 });
