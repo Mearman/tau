@@ -138,7 +138,7 @@ export default function (pi: ExtensionAPI) {
             const query = input.query;
             if (typeof query === "string" && query) {
                 return theme.fg(
-                    "cyan",
+                    "dim",
                     `🔍 ${query.length > 60 ? query.slice(0, 57) + "…" : query}`
                 );
             }
@@ -147,7 +147,7 @@ export default function (pi: ExtensionAPI) {
         const url = input.url;
         if (typeof url === "string" && url) {
             return theme.fg(
-                "cyan",
+                "dim",
                 `🌐 ${url.length > 60 ? url.slice(0, 57) + "…" : url}`
             );
         }
