@@ -142,6 +142,13 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
     {
+        id: "web-search",
+        label: "Web search",
+        description: "Search the web via Claude, Brave, or DuckDuckGo",
+        group: "Integrations",
+        defaultOn: true,
+    },
+    {
         id: "callbacks",
         label: "Callbacks",
         description: "Reminders and timed callback tools",
