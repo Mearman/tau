@@ -105,6 +105,7 @@ const handlers = {
 	// Page interaction
 	"get-text": getText,
 	"evaluate": evaluateJS,
+	"inject-converters": injectConverters,
 	"click": click,
 	"fill": fill,
 	"select-option": selectOption,
@@ -371,9 +372,25 @@ async function getText(params) {
 	return out;
 }
 
-// ── Shadow DOM-aware click ─────────────────────────────────────────
+// ── Converter injection (markdown/structure) ────────────────────────
 
-async function click(params) {
+/**
+ * Inject the markdown/structure converters into the page's MAIN world.
+ * Idempotent — each converter's IIFE checks for an existing global
+ * before assigning. Returns an object describing what was injected.
+ */
+async function injectConverters(params) {
+	const tabId = Number(params.tabId);
+	const results = await chrome.scripting.executeScript({
+		target: { tabId },
+		world: "MAIN",
+		files: ["dom-to-markdown.js", "dom-to-structure.js"],
+	});
+	const result = results[0]?.result;
+	return { ok: true, result: result ?? null };
+}
+
+// ── Shadow DOM-aware click ─────────────────────────────────────────
 	const tabId = Number(params.tabId);
 	const result = await executeInPage(tabId, (sel) => {
 		function queryDeep(root, sel) {

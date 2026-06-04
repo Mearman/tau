@@ -498,9 +498,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 }
 
                 if (format === "markdown") {
+                    await bridge.injectConverters(tabId, socketPath);
                     const md = await bridge.evaluate(
                         tabId,
-                        `(() => { if (typeof window.__domToMarkdown !== 'function') return 'Converters not injected'; return window.__domToMarkdown(); })()`,
+                        "window.__domToMarkdown()",
                         socketPath
                     );
                     return {
@@ -514,6 +515,8 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 }
 
                 if (format === "structure") {
+                    await bridge.injectConverters(tabId, socketPath);
+
                     // GitHub-aware: shallow-clone repo instead of DOM walk
                     const gh = matchGitHubRepo(params.url);
                     if (gh) {
@@ -542,7 +545,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
 
                     const data = await bridge.evaluate(
                         tabId,
-                        `(() => { if (typeof window.__domToStructure !== 'function') return { error: 'Converters not injected' }; return window.__domToStructure(); })()`,
+                        "JSON.stringify(window.__domToStructure())",
                         socketPath
                     );
                     return {

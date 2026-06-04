@@ -419,6 +419,19 @@ export async function evaluate(
     return redactText(result as string);
 }
 
+/**
+ * Inject the markdown/structure converters into the page's MAIN world.
+ * Idempotent: re-injecting into a tab that already has the converters
+ * is a no-op (each converter's IIFE checks for the existing global).
+ */
+export async function injectConverters(
+    tabId: number,
+    socketPath?: string
+): Promise<unknown> {
+    const resolvedPath = socketPath ?? (await findSocketForTab(tabId));
+    return await sendCommand(resolvedPath, "inject-converters", { tabId });
+}
+
 /** Navigate a tab to a URL. */
 export async function navigate(
     tabId: number,
