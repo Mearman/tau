@@ -239,7 +239,22 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
     pi.on("session_shutdown", async () => {
         cdp.disconnect();
         bridge.disconnect();
+        tabCache.clear();
     });
+
+    // ── chrome_list TTL cache ────────────────────────────────────────
+    const TAB_CACHE_TTL_MS = 30_000;
+    const tabCache = new Map<
+        string,
+        {
+            tabs: Array<
+                | cdp.TabInfo
+                | applescript.AppleScriptTabInfo
+                | bridge.BridgeTabInfo
+            >;
+            fetchedAt: number;
+        }
+    >();
 
     // ── chrome_list ─────────────────────────────────────────────────
     pi.registerTool({
@@ -285,7 +300,12 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 | bridge.BridgeTabInfo
             > = [];
 
-            if (mode === "bridge") {
+            // Check TTL cache for this mode
+            const cached = tabCache.get(mode);
+            if (cached && Date.now() - cached.fetchedAt < TAB_CACHE_TTL_MS) {
+                tabs = cached.tabs;
+                usedMode = mode;
+            } else if (mode === "bridge") {
                 if (!(await bridge.isAvailable())) {
                     throw new Error(
                         "Pi Chrome Bridge is not available. Install the extension and native host:\n" +
@@ -302,6 +322,11 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             } else if (mode === "applescript") {
                 tabs = await applescript.listTabs();
                 usedMode = "applescript";
+            }
+
+            // Update cache (only after a fresh fetch, not a cache hit)
+            if (!cached || Date.now() - cached.fetchedAt >= TAB_CACHE_TTL_MS) {
+                tabCache.set(mode, { tabs, fetchedAt: Date.now() });
             }
 
             if (tabs.length === 0) {
