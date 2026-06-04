@@ -114,6 +114,18 @@ const WAIT_UNTIL_PARAM = Type.Optional(
     })
 );
 
+const SESSION_PARAM = Type.Optional(
+    StringEnum(["fresh"] as const, {
+        description:
+            "Session isolation hint. 'fresh' opens a new incognito window so " +
+            "the call does not mutate the user's actual Chrome (cookies, history, " +
+            "logins). The incognito window is closed when the call finishes. " +
+            "Only honoured in browser: 'bridge' mode. In browser: 'isolated' mode " +
+            "the browser is already fresh per call, so this is a no-op. " +
+            "In browser: 'cdp' and 'applescript' modes it is rejected.",
+    })
+);
+
 // ── Isolated browser helpers (lazy playwright) ───────────────────────
 
 async function launchBrowser(): Promise<PlaywrightBrowser> {
@@ -448,6 +460,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             waitUntil: WAIT_UNTIL_PARAM,
             browser: Type.Optional(BROWSER_PARAM),
             tabId: TAB_ID_PARAM,
+            session: SESSION_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
             if (!isFeatureEnabled(state, "web-browse")) {
@@ -462,6 +475,21 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             }
             const browserMode = params.browser ?? "isolated";
             const format = params.format ?? "text";
+            const session = params.session;
+
+            if (session === "fresh" && browserMode === "cdp") {
+                throw new Error(
+                    "session: 'fresh' is only supported in browser: 'bridge' mode. " +
+                        "browser: 'cdp' operates on the user's existing Chrome tabs and cannot open an isolated window. " +
+                        "Use browser: 'bridge' (default for the fresh session) or drop session: 'fresh'."
+                );
+            }
+            if (session === "fresh" && browserMode === "applescript") {
+                throw new Error(
+                    "session: 'fresh' is only supported in browser: 'bridge' mode. " +
+                        "browser: 'applescript' is read-only and operates on the user's existing Chrome tabs."
+                );
+            }
 
             // ── Bridge mode ──────────────────────────────────────────
             if (browserMode === "bridge") {
@@ -473,29 +501,42 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
 
                 let tabId = params.tabId;
                 let socketPath: string | undefined;
+                let incognitoWindowId: number | undefined;
 
-                if (tabId === undefined) {
+                if (session === "fresh") {
+                    // Open a new incognito window; any provided tabId is
+                    // ignored — session: 'fresh' always uses a fresh tab.
+                    const result = await bridge.newTabInIncognitoWindow(
+                        params.url
+                    );
+                    tabId = result.tabInfo.id;
+                    socketPath = result.socketPath;
+                    incognitoWindowId = result.windowId;
+                    await new Promise((r) => setTimeout(r, 3000));
+                } else if (tabId === undefined) {
                     const newTabResult = await bridge.newTab(params.url);
                     tabId = newTabResult.tabInfo.id;
                     socketPath = newTabResult.socketPath;
                     await new Promise((r) => setTimeout(r, 3000));
                 }
 
-                if (format === "text") {
-                    const text = await bridge.getTabText(
-                        tabId,
-                        params.selector,
-                        socketPath
-                    );
-                    return {
-                        content: [{ type: "text", text }],
-                        details: {
-                            format: "text",
-                            browser: "bridge",
-                            tabId: tabId,
-                        },
-                    };
-                }
+                try {
+                    if (format === "text") {
+                        const text = await bridge.getTabText(
+                            tabId,
+                            params.selector,
+                            socketPath
+                        );
+                        return {
+                            content: [{ type: "text", text }],
+                            details: {
+                                format: "text",
+                                browser: "bridge",
+                                tabId: tabId,
+                                session,
+                            },
+                        };
+                    }
 
                 if (format === "markdown") {
                     await bridge.injectConverters(tabId, socketPath);
@@ -510,6 +551,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             format: "markdown",
                             browser: "bridge",
                             tabId: tabId,
+                            session,
                         },
                     };
                 }
@@ -536,6 +578,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                                     format: "github-repo",
                                     browser: "bridge",
                                     tabId: tabId,
+                                    session,
                                 },
                             };
                         } catch {
@@ -554,11 +597,25 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                             format: "structure",
                             browser: "bridge",
                             tabId: tabId,
+                            session,
                         },
                     };
                 }
 
-                throw new Error(`Unknown format: ${String(format)}`);
+                    throw new Error(`Unknown format: ${String(format)}`);
+                } finally {
+                    if (incognitoWindowId !== undefined) {
+                        try {
+                            await bridge.closeWindow(
+                                incognitoWindowId,
+                                socketPath
+                            );
+                        } catch {
+                            // Best-effort cleanup — the original result
+                            // (or error) is what the caller cares about.
+                        }
+                    }
+                }
             }
 
             // ── AppleScript mode ───────────────────────────────────
@@ -658,6 +715,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             waitUntil: WAIT_UNTIL_PARAM,
             browser: Type.Optional(BROWSER_PARAM),
             tabId: TAB_ID_PARAM,
+            session: SESSION_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
             if (!isFeatureEnabled(state, "web-browse")) {
@@ -671,10 +729,19 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 };
             }
             const browserMode = params.browser ?? "isolated";
+            const session = params.session;
 
             if (browserMode === "applescript") {
                 throw new Error(
                     "Screenshots are not supported in AppleScript mode. Use browser: 'bridge', 'cdp', or 'isolated'."
+                );
+            }
+
+            if (session === "fresh" && browserMode === "cdp") {
+                throw new Error(
+                    "session: 'fresh' is only supported in browser: 'bridge' mode. " +
+                        "browser: 'cdp' operates on the user's existing Chrome tabs and cannot open an isolated window. " +
+                        "Use browser: 'bridge' (default for the fresh session) or drop session: 'fresh'."
                 );
             }
 
@@ -688,36 +755,67 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
 
                 let tabId = params.tabId;
                 let socketPath: string | undefined;
+                let incognitoWindowId: number | undefined;
 
-                if (tabId === undefined) {
+                if (session === "fresh") {
+                    // Open a new incognito window; any provided tabId is
+                    // ignored — session: 'fresh' always uses a fresh tab.
+                    const result = await bridge.newTabInIncognitoWindow(
+                        params.url
+                    );
+                    tabId = result.tabInfo.id;
+                    socketPath = result.socketPath;
+                    incognitoWindowId = result.windowId;
+                    await new Promise((r) => setTimeout(r, 3000));
+                } else if (tabId === undefined) {
                     const newTabResult = await bridge.newTab(params.url);
                     tabId = newTabResult.tabInfo.id;
                     socketPath = newTabResult.socketPath;
                     await new Promise((r) => setTimeout(r, 3000));
                 }
 
-                const path =
-                    params.outputPath ??
-                    join("/tmp", `screenshot-${Date.now()}.png`);
+                try {
+                    const path =
+                        params.outputPath ??
+                        join("/tmp", `screenshot-${Date.now()}.png`);
 
-                const base64Png = await bridge.screenshot(tabId, socketPath);
-                const buffer = Buffer.from(base64Png, "base64");
-                const dir = path.substring(0, path.lastIndexOf("/"));
-                if (dir) mkdirSync(dir, { recursive: true });
-                writeFileSync(path, buffer);
+                    const base64Png = await bridge.screenshot(
+                        tabId,
+                        socketPath
+                    );
+                    const buffer = Buffer.from(base64Png, "base64");
+                    const dir = path.substring(0, path.lastIndexOf("/"));
+                    if (dir) mkdirSync(dir, { recursive: true });
+                    writeFileSync(path, buffer);
 
-                return {
-                    content: [
-                        { type: "text", text: `Screenshot saved to: ${path}` },
-                    ],
-                    details: {
-                        path,
-                        browser: "bridge",
-                        tabId: tabId,
-                        consoleErrors: 0,
-                        url: params.url,
-                    },
-                };
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Screenshot saved to: ${path}`,
+                            },
+                        ],
+                        details: {
+                            path,
+                            browser: "bridge",
+                            tabId: tabId,
+                            consoleErrors: 0,
+                            url: params.url,
+                            session,
+                        },
+                    };
+                } finally {
+                    if (incognitoWindowId !== undefined) {
+                        try {
+                            await bridge.closeWindow(
+                                incognitoWindowId,
+                                socketPath
+                            );
+                        } catch {
+                            // Best-effort cleanup
+                        }
+                    }
+                }
             }
 
             // ── CDP mode ────────────────────────────────────────────
@@ -906,6 +1004,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             ),
             browser: Type.Optional(BROWSER_PARAM),
             tabId: TAB_ID_PARAM,
+            session: SESSION_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
             if (!isFeatureEnabled(state, "web-browse")) {
@@ -920,10 +1019,19 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             }
             const browserMode = params.browser ?? "isolated";
             const returnFormat = params.returnFormat ?? "text";
+            const session = params.session;
 
             if (browserMode === "applescript") {
                 throw new Error(
                     "Interaction is not supported in AppleScript mode. Use browser: 'bridge', 'cdp', or 'isolated'."
+                );
+            }
+
+            if (session === "fresh" && browserMode === "cdp") {
+                throw new Error(
+                    "session: 'fresh' is only supported in browser: 'bridge' mode. " +
+                        "browser: 'cdp' operates on the user's existing Chrome tabs and cannot open an isolated window. " +
+                        "Use browser: 'bridge' (default for the fresh session) or drop session: 'fresh'."
                 );
             }
 
@@ -937,189 +1045,220 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
 
                 let tabId = params.tabId;
                 let socketPath: string | undefined;
-                if (tabId === undefined) {
+                let incognitoWindowId: number | undefined;
+
+                if (session === "fresh") {
+                    // Open a new incognito window; any provided tabId is
+                    // ignored — session: 'fresh' always uses a fresh tab.
+                    const result = await bridge.newTabInIncognitoWindow(
+                        params.url
+                    );
+                    tabId = result.tabInfo.id;
+                    socketPath = result.socketPath;
+                    incognitoWindowId = result.windowId;
+                    await new Promise((r) => setTimeout(r, 3000));
+                } else if (tabId === undefined) {
                     const newTabResult = await bridge.newTab(params.url);
                     tabId = newTabResult.tabInfo.id;
                     socketPath = newTabResult.socketPath;
                     await new Promise((r) => setTimeout(r, 3000));
                 }
 
-                const outputs: string[] = [];
+                try {
+                    const outputs: string[] = [];
 
-                for (const action of params.actions) {
-                    switch (action.type) {
-                        case "navigate":
-                            await bridge.navigate(
-                                tabId,
-                                action.url ?? params.url,
-                                socketPath
-                            );
-                            await new Promise((r) => setTimeout(r, 2000));
-                            break;
-                        case "click":
-                            await bridge.click(
-                                tabId,
-                                action.selector!,
-                                socketPath
-                            );
-                            await new Promise((r) => setTimeout(r, 1000));
-                            break;
-                        case "fill":
-                            await bridge.fill(
-                                tabId,
-                                action.selector!,
-                                action.value ?? "",
-                                socketPath
-                            );
-                            break;
-                        case "select":
-                            await bridge.selectOption(
-                                tabId,
-                                action.selector!,
-                                action.value ?? "",
-                                socketPath
-                            );
-                            break;
-                        case "press": {
-                            await bridge.pressKey(
-                                tabId,
-                                action.key!,
-                                action.selector,
-                                socketPath
-                            );
-                            break;
-                        }
-                        case "hover": {
-                            await bridge.hover(
-                                tabId,
-                                action.selector!,
-                                socketPath
-                            );
-                            await new Promise((r) => setTimeout(r, 500));
-                            break;
-                        }
-                        case "scroll": {
-                            await bridge.scroll(
-                                tabId,
-                                action.direction ?? "down",
-                                action.selector,
-                                undefined,
-                                socketPath
-                            );
-                            break;
-                        }
-                        case "wait": {
-                            if (action.selector) {
-                                const waited = await bridge.waitForElement(
+                    for (const action of params.actions) {
+                        switch (action.type) {
+                            case "navigate":
+                                await bridge.navigate(
                                     tabId,
-                                    action.selector,
-                                    action.ms,
+                                    action.url ?? params.url,
                                     socketPath
                                 );
-                                if (!waited.found)
-                                    outputs.push(
-                                        `Element not found: ${action.selector}`
-                                    );
-                            } else {
-                                await new Promise((r) =>
-                                    setTimeout(r, action.ms ?? 1000)
+                                await new Promise((r) => setTimeout(r, 2000));
+                                break;
+                            case "click":
+                                await bridge.click(
+                                    tabId,
+                                    action.selector!,
+                                    socketPath
                                 );
+                                await new Promise((r) => setTimeout(r, 1000));
+                                break;
+                            case "fill":
+                                await bridge.fill(
+                                    tabId,
+                                    action.selector!,
+                                    action.value ?? "",
+                                    socketPath
+                                );
+                                break;
+                            case "select":
+                                await bridge.selectOption(
+                                    tabId,
+                                    action.selector!,
+                                    action.value ?? "",
+                                    socketPath
+                                );
+                                break;
+                            case "press": {
+                                await bridge.pressKey(
+                                    tabId,
+                                    action.key!,
+                                    action.selector,
+                                    socketPath
+                                );
+                                break;
                             }
-                            break;
+                            case "hover": {
+                                await bridge.hover(
+                                    tabId,
+                                    action.selector!,
+                                    socketPath
+                                );
+                                await new Promise((r) => setTimeout(r, 500));
+                                break;
+                            }
+                            case "scroll": {
+                                await bridge.scroll(
+                                    tabId,
+                                    action.direction ?? "down",
+                                    action.selector,
+                                    undefined,
+                                    socketPath
+                                );
+                                break;
+                            }
+                            case "wait": {
+                                if (action.selector) {
+                                    const waited = await bridge.waitForElement(
+                                        tabId,
+                                        action.selector,
+                                        action.ms,
+                                        socketPath
+                                    );
+                                    if (!waited.found)
+                                        outputs.push(
+                                            `Element not found: ${action.selector}`
+                                        );
+                                } else {
+                                    await new Promise((r) =>
+                                        setTimeout(r, action.ms ?? 1000)
+                                    );
+                                }
+                                break;
+                            }
+                            case "evaluate": {
+                                const expr =
+                                    action.expression ?? action.value ?? "";
+                                const result = await bridge.evaluate(
+                                    tabId,
+                                    expr,
+                                    socketPath
+                                );
+                                outputs.push(
+                                    `Evaluate result: ${String(result)}`
+                                );
+                                break;
+                            }
+                            case "extract": {
+                                const attrs = await bridge.getAttributes(
+                                    tabId,
+                                    action.selector!,
+                                    undefined,
+                                    socketPath
+                                );
+                                outputs.push(JSON.stringify(attrs, null, 2));
+                                break;
+                            }
+                            case "content": {
+                                const text = await bridge.getTabText(
+                                    tabId,
+                                    undefined,
+                                    socketPath
+                                );
+                                outputs.push(text);
+                                break;
+                            }
+                            case "screenshot": {
+                                const path =
+                                    action.path ??
+                                    join(
+                                        "/tmp",
+                                        `screenshot-${Date.now()}.png`
+                                    );
+                                const base64Png = await bridge.screenshot(
+                                    tabId,
+                                    socketPath
+                                );
+                                writeFileSync(
+                                    path,
+                                    Buffer.from(base64Png, "base64")
+                                );
+                                outputs.push(`Screenshot saved: ${path}`);
+                                break;
+                            }
+                            default:
+                                outputs.push(
+                                    `(Action '${action.type}' not yet supported in bridge mode)`
+                                );
                         }
-                        case "evaluate": {
-                            const expr =
-                                action.expression ?? action.value ?? "";
-                            const result = await bridge.evaluate(
+                    }
+
+                    let finalContent: string;
+                    if (returnFormat === "markdown") {
+                        finalContent = String(
+                            await bridge.evaluate(
                                 tabId,
-                                expr,
+                                "(() => { if (typeof window.__domToMarkdown !== 'function') return document.body.innerText; return window.__domToMarkdown(); })()",
+                                socketPath
+                            )
+                        );
+                    } else if (returnFormat === "structure") {
+                        finalContent = String(
+                            await bridge.evaluate(
+                                tabId,
+                                "(() => { if (typeof window.__domToStructure !== 'function') return JSON.stringify({error:'Converters not injected'}); return JSON.stringify(window.__domToStructure()); })()",
+                                socketPath
+                            )
+                        );
+                    } else {
+                        finalContent = await bridge.getTabText(
+                            tabId,
+                            undefined,
+                            socketPath
+                        );
+                    }
+
+                    const parts = outputs.join("\n\n");
+                    const fullText = parts
+                        ? `${parts}\n\n---\n\n${finalContent}`
+                        : finalContent;
+
+                    return {
+                        content: [{ type: "text", text: fullText }],
+                        details: {
+                            url: params.url,
+                            actionCount: params.actions.length,
+                            returnFormat,
+                            browser: "bridge",
+                            tabId: tabId,
+                            consoleErrors: 0,
+                            session,
+                        },
+                    };
+                } finally {
+                    if (incognitoWindowId !== undefined) {
+                        try {
+                            await bridge.closeWindow(
+                                incognitoWindowId,
                                 socketPath
                             );
-                            outputs.push(`Evaluate result: ${String(result)}`);
-                            break;
+                        } catch {
+                            // Best-effort cleanup
                         }
-                        case "extract": {
-                            const attrs = await bridge.getAttributes(
-                                tabId,
-                                action.selector!,
-                                undefined,
-                                socketPath
-                            );
-                            outputs.push(JSON.stringify(attrs, null, 2));
-                            break;
-                        }
-                        case "content": {
-                            const text = await bridge.getTabText(
-                                tabId,
-                                undefined,
-                                socketPath
-                            );
-                            outputs.push(text);
-                            break;
-                        }
-                        case "screenshot": {
-                            const path =
-                                action.path ??
-                                join("/tmp", `screenshot-${Date.now()}.png`);
-                            const base64Png = await bridge.screenshot(
-                                tabId,
-                                socketPath
-                            );
-                            writeFileSync(
-                                path,
-                                Buffer.from(base64Png, "base64")
-                            );
-                            outputs.push(`Screenshot saved: ${path}`);
-                            break;
-                        }
-                        default:
-                            outputs.push(
-                                `(Action '${action.type}' not yet supported in bridge mode)`
-                            );
                     }
                 }
-
-                let finalContent: string;
-                if (returnFormat === "markdown") {
-                    finalContent = String(
-                        await bridge.evaluate(
-                            tabId,
-                            "(() => { if (typeof window.__domToMarkdown !== 'function') return document.body.innerText; return window.__domToMarkdown(); })()",
-                            socketPath
-                        )
-                    );
-                } else if (returnFormat === "structure") {
-                    finalContent = String(
-                        await bridge.evaluate(
-                            tabId,
-                            "(() => { if (typeof window.__domToStructure !== 'function') return JSON.stringify({error:'Converters not injected'}); return JSON.stringify(window.__domToStructure()); })()",
-                            socketPath
-                        )
-                    );
-                } else {
-                    finalContent = await bridge.getTabText(
-                        tabId,
-                        undefined,
-                        socketPath
-                    );
-                }
-
-                const parts = outputs.join("\n\n");
-                const fullText = parts
-                    ? `${parts}\n\n---\n\n${finalContent}`
-                    : finalContent;
-
-                return {
-                    content: [{ type: "text", text: fullText }],
-                    details: {
-                        url: params.url,
-                        actionCount: params.actions.length,
-                        returnFormat,
-                        browser: "bridge",
-                        tabId: tabId,
-                        consoleErrors: 0,
-                    },
-                };
             }
 
             // ── CDP mode ────────────────────────────────────────────

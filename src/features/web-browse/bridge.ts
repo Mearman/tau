@@ -497,6 +497,54 @@ export async function newTab(
 }
 
 /**
+ * Open a new incognito window and return its first tab. The window does
+ * not steal focus from the user's current work. The caller is
+ * responsible for closing the window when finished — use closeWindow()
+ * with the returned windowId.
+ */
+export interface IncognitoTabResult {
+    tabInfo: BridgeTabInfo;
+    socketPath: string;
+    windowId: number;
+}
+
+export async function newTabInIncognitoWindow(
+    url?: string
+): Promise<IncognitoTabResult> {
+    const socketPath = await getDefaultSocketPath();
+    const result = (await sendCommand(socketPath, "create-window", {
+        url: url ?? "about:blank",
+        incognito: true,
+        focused: false,
+    })) as BridgeWindow;
+
+    const firstTab = result.tabs?.[0];
+    if (!firstTab) {
+        throw new Error(
+            "Failed to create incognito window: Chrome returned no tabs. " +
+                "Check that Chrome is running and incognito is not disabled by policy."
+        );
+    }
+    if (result.id === undefined) {
+        throw new Error(
+            "Failed to create incognito window: Chrome returned no window ID."
+        );
+    }
+
+    const profileName = getProfileForSocket(socketPath);
+    const tabInfo: BridgeTabInfo = {
+        id: firstTab.id,
+        windowId: result.id,
+        index: firstTab.index,
+        title: firstTab.title,
+        url: firstTab.url,
+        active: firstTab.active,
+        profile: profileName,
+    };
+    return { tabInfo, socketPath, windowId: result.id };
+}
+
+/**
  * Poll list-tabs until either the created tab ID appears in the list
  * or a tab with the target URL appears (up to 5 attempts over 2.5s).
  */
