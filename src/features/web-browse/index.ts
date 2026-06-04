@@ -538,6 +538,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         };
                     }
 
+<<<<<<< HEAD
                 if (format === "markdown") {
                     await bridge.injectConverters(tabId, socketPath);
                     const md = await bridge.evaluate(
@@ -601,6 +602,74 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         },
                     };
                 }
+=======
+                    if (format === "markdown") {
+                        await bridge.injectConverters(tabId, socketPath);
+                        const md = await bridge.evaluate(
+                            tabId,
+                            "window.__domToMarkdown()",
+                            socketPath
+                        );
+                        return {
+                            content: [{ type: "text", text: String(md) }],
+                            details: {
+                                format: "markdown",
+                                browser: "bridge",
+                                tabId: tabId,
+                                session,
+                            },
+                        };
+                    }
+
+                    if (format === "structure") {
+                        // GitHub-aware: shallow-clone repo instead of DOM walk
+                        const gh = matchGitHubRepo(params.url);
+                        if (gh) {
+                            try {
+                                const repoData = extractRepoStructure(
+                                    gh.owner,
+                                    gh.repo
+                                );
+                                return {
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: JSON.stringify(
+                                                repoData,
+                                                null,
+                                                2
+                                            ),
+                                        },
+                                    ],
+                                    details: {
+                                        format: "github-repo",
+                                        browser: "bridge",
+                                        tabId: tabId,
+                                        session,
+                                    },
+                                };
+                            } catch {
+                                // Clone failed — fall through to DOM extraction
+                            }
+                        }
+
+                        await bridge.injectConverters(tabId, socketPath);
+                        const data = await bridge.evaluate(
+                            tabId,
+                            "JSON.stringify(window.__domToStructure())",
+                            socketPath
+                        );
+                        return {
+                            content: [{ type: "text", text: String(data) }],
+                            details: {
+                                format: "structure",
+                                browser: "bridge",
+                                tabId: tabId,
+                                session,
+                            },
+                        };
+                    }
+>>>>>>> 90dcc6e (style(web-browse): fix indentation after merge)
 
                     throw new Error(`Unknown format: ${String(format)}`);
                 } finally {
