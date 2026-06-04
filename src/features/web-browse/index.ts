@@ -25,8 +25,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { domToMarkdown } from "./markdown.ts";
+import { domToStructure } from "./structure.ts";
 
 /** Types for DOM converter scripts injected into pages at runtime. */
 declare global {
@@ -66,8 +67,6 @@ import * as bridge from "./bridge.ts";
 import type { TauState } from "../../state.ts";
 import { isFeatureEnabled } from "../features-helpers.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 // ── Constants ────────────────────────────────────────────────────────
 
 const TIMEOUT = 30_000;
@@ -75,22 +74,12 @@ const VIEWPORT = { width: 1280, height: 720 } as const;
 const USER_AGENT =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// Resolve the shared JS converter scripts from the skill directory
-// ~/.agents/skills/web-browse/scripts/
-const CONVERTERS_DIR = join(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "..",
-    "..",
-    "..",
-    "..",
-    ".agents",
-    "skills",
-    "web-browse",
-    "scripts"
-);
+// Page-side converter scripts. The arrow functions in markdown.ts and
+// structure.ts are self-contained (no closures, no imports — see their
+// file headers) and serialised to strings here so they can be injected
+// into the page without depending on files on disk.
+const MARKDOWN_INIT = `window.__domToMarkdown = ${domToMarkdown.toString()};`;
+const STRUCTURE_INIT = `window.__domToStructure = ${domToStructure.toString()};`;
 
 // ── Shared browser mode parameter ────────────────────────────────────
 
@@ -151,12 +140,8 @@ async function createPage(browser: PlaywrightBrowser): Promise<PlaywrightPage> {
     await page.addInitScript(() => {
         Object.defineProperty(navigator, "webdriver", { get: () => false });
     });
-    await page.addInitScript({
-        path: join(CONVERTERS_DIR, "dom-to-markdown.js"),
-    });
-    await page.addInitScript({
-        path: join(CONVERTERS_DIR, "dom-to-structure.js"),
-    });
+    await page.addInitScript({ content: MARKDOWN_INIT });
+    await page.addInitScript({ content: STRUCTURE_INIT });
     page.setDefaultTimeout(TIMEOUT);
     return page;
 }
@@ -205,12 +190,8 @@ async function ensureConverters(page: PlaywrightPage): Promise<void> {
     );
     if (hasConverters) return;
 
-    await page.addScriptTag({
-        path: join(CONVERTERS_DIR, "dom-to-markdown.js"),
-    });
-    await page.addScriptTag({
-        path: join(CONVERTERS_DIR, "dom-to-structure.js"),
-    });
+    await page.addScriptTag({ content: MARKDOWN_INIT });
+    await page.addScriptTag({ content: STRUCTURE_INIT });
 }
 
 /**
