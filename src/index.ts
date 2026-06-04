@@ -120,6 +120,41 @@ export default function (pi: ExtensionAPI) {
 
     // ── Agent events (cross-cutting) ──────────────────────────────────
 
+    /** Build a status bar string for web tool calls showing URL or query. */
+    function getWebToolStatus(
+        toolName: string,
+        input: Record<string, unknown>,
+        theme: { fg(colour: string, text: string): string }
+    ): string | undefined {
+        const webTools = new Set([
+            "web_browse",
+            "web_screenshot",
+            "web_interact",
+            "web_search",
+        ]);
+        if (!webTools.has(toolName)) return undefined;
+
+        if (toolName === "web_search") {
+            const query = input.query;
+            if (typeof query === "string" && query) {
+                return theme.fg(
+                    "cyan",
+                    `🔍 ${query.length > 60 ? query.slice(0, 57) + "…" : query}`
+                );
+            }
+        }
+
+        const url = input.url;
+        if (typeof url === "string" && url) {
+            return theme.fg(
+                "cyan",
+                `🌐 ${url.length > 60 ? url.slice(0, 57) + "…" : url}`
+            );
+        }
+
+        return undefined;
+    }
+
     pi.on("agent_start", async (_event, ctx) => {
         startTitlebarSpinner(pi, state, ctx);
         state.agentStartTime = Date.now();
@@ -127,6 +162,18 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult> => {
+        // Show URL/query in status bar for web tools
+        if (ctx.hasUI) {
+            const webStatus = getWebToolStatus(
+                event.toolName,
+                event.input,
+                ctx.ui.theme
+            );
+            if (webStatus) {
+                ctx.ui.setStatus("tau-web", webStatus);
+            }
+        }
+
         // Agent backgrounding
         if (state.agentBackgrounded) {
             return { block: true, reason: "" };
@@ -234,11 +281,16 @@ export default function (pi: ExtensionAPI) {
         }
     });
 
-    pi.on("turn_end", async (_event, _ctx) => {
+    pi.on("turn_end", async (_event, ctx) => {
         // Stop the elapsed timer between turns
         if (state.agentTimer) {
             clearInterval(state.agentTimer);
             state.agentTimer = null;
+        }
+
+        // Clear web tool status after each turn
+        if (ctx.hasUI) {
+            ctx.ui.setStatus("tau-web", undefined);
         }
     });
 
