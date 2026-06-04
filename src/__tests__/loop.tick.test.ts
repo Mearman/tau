@@ -122,11 +122,6 @@ const noopCtx = {
 
 void describe("loop tick behaviour", () => {
     void it("sends the first count tick without deliverAs when agent is idle", async () => {
-        // The pi runtime always treats sendUserMessage as fire-and-forget; the
-        // SDK's prompt() takes the not-streaming path when isStreaming is
-        // false and triggers a new turn regardless of the deliverAs option.
-        // We explicitly pass no options when idle so the SDK always picks
-        // the trigger-new-turn path.
         const mod = await import("../features/loop.ts");
         const pi = createMockPi();
         mod.registerLoop(asApi(pi), {} as never);
@@ -153,6 +148,10 @@ void describe("loop tick behaviour", () => {
             first.text.includes("do something"),
             "tick message should include the loop prompt"
         );
+
+        // Clean up: stop all loops so setInterval/setTimeout timers don't
+        // keep the process alive after the test.
+        await handler("stop", noopCtx);
     });
 
     void it("sends the first interval tick without deliverAs when agent is idle", async () => {
@@ -169,6 +168,8 @@ void describe("loop tick behaviour", () => {
         const first = pi.sentMessages[0];
         assert.equal(first.options, undefined);
         assert.ok(first.text.includes("check the deploy"));
+
+        await handler("stop", noopCtx);
     });
 
     void it("sends the first infinite tick without deliverAs when fired after agent_end", async () => {
@@ -202,5 +203,7 @@ void describe("loop tick behaviour", () => {
             undefined,
             "post-agent-end infinite tick should not pass deliverAs (agent is idle)"
         );
+
+        await handler("stop", noopCtx);
     });
 });

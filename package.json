@@ -30,7 +30,7 @@
     "provenance": true
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test 'src/__tests__/*.test.ts'",
+    "test": "node --experimental-strip-types --test --test-force-exit 'src/__tests__/*.test.ts'",
     "test:coverage": "c8 pnpm test",
     "check": "tsc --noEmit",
     "lint": "eslint --cache",

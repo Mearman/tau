@@ -442,11 +442,42 @@ export function registerLoop(pi: ExtensionAPI, state: TauState): void {
     const loops: LoopEntry[] = [];
     let nextId = 1;
 
+    // Track whether the agent is currently processing a turn. Updated via
+    // agent_start/agent_end events. Used by emitTick to decide whether to pass
+    // deliverAs: "followUp" (when the agent is busy) or trigger a new turn
+    // directly (when the agent is idle). The previous unconditional
+    // deliverAs was safe in this SDK version, but tracking the state
+    // explicitly matches the goal feature's pattern and guards against
+    // future SDK changes where deliverAs might be respected even when idle.
+    let isAgentIdle = true;
+
+    pi.on("agent_start", () => {
+        isAgentIdle = false;
+    });
+
+    pi.on("agent_end", () => {
+        // agent_end fires while the agent is still streaming (isStreaming
+        // stays true until finishRun runs in the finally block). Defer the
+        // state update so it reflects the post-finish state.
+        setTimeout(() => {
+            isAgentIdle = true;
+        }, 0);
+    });
+
+    function sendTick(msg: string): void {
+        if (isAgentIdle) {
+            // Agent is idle: trigger a new turn directly.
+            pi.sendUserMessage(msg);
+        } else {
+            // Agent is busy: queue as a follow-up so it runs after the
+            // current turn completes.
+            pi.sendUserMessage(msg, { deliverAs: "followUp" });
+        }
+    }
+
     function emitTick(entry: LoopEntry): void {
         entry.lastTickAt = new Date();
-        pi.sendUserMessage(buildTickMessage(entry.prompt, entry.lastTickAt), {
-            deliverAs: "followUp",
-        });
+        sendTick(buildTickMessage(entry.prompt, entry.lastTickAt));
     }
 
     function startLoop(parsed: ParsedLoop): LoopEntry {
@@ -648,7 +679,10 @@ You will receive periodic <${TICK_TAG}> prompts. These are check-ins: continue w
             const msg = buildTickMessage(loop.prompt, loop.lastTickAt);
             loop.pendingTick = setTimeout(() => {
                 loop.pendingTick = null;
-                pi.sendUserMessage(msg, { deliverAs: "followUp" });
+                // By TICK_DELAY_MS (500ms) the agent has finished its current
+                // turn, so sendTick will trigger a new turn rather than
+                // queueing as a follow-up.
+                sendTick(msg);
             }, TICK_DELAY_MS);
         }
     });
