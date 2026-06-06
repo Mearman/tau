@@ -21,7 +21,7 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { Lexer } from "marked";
+import { Lexer, type Token } from "marked";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TauState } from "../state.ts";
 import { isFeatureEnabled } from "./features-helpers.ts";
@@ -275,48 +275,101 @@ export function stripHtmlComments(content: string): string {
 // ─── @include resolution ─────────────────────────────────────────────
 
 /**
- * Extract @include paths from content. Scans text outside fenced code
- * blocks for `@path`, `@./path`, `@~/path`, `@/path` patterns.
+ * Extract @include paths from content using the marked lexer.
+ *
+ * Walks all token trees (paragraphs, list items, links, etc.) looking
+ * for text nodes containing `@path` patterns. This handles:
+ *
+ *   @./relative.md                          — bare include
+ *   [label @./path.md](./path.md)            — markdown link + include
+ *   [@./path.md](./path.md)                  — link text is the include
+ *
+ * Matches Claude Code's extractIncludePathsFromTokens behaviour:
+ * recurses into all child token arrays, skips code/codespan tokens,
+ * and processes html comment residue.
  */
 export function extractIncludePaths(
     content: string,
     basePath: string
 ): string[] {
-    const paths: string[] = [];
+    const tokens = new Lexer({ gfm: false }).lex(content);
+    const found = new Set<string>();
 
-    // Strip fenced code blocks so we don't match @mentions inside them
-    const stripped = content.replace(/^```[\s\S]*?^```/gm, "");
+    const includeRe = /(?:^|\s)@((?:[^\s\\]|\\ )+)/gm;
+    const commentSpan = /<!--[\s\S]*?-->/g;
 
-    const re = /(?:^|\s)@((?:[^\s\\]|\\ )+)/gm;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(stripped)) !== null) {
-        let p = match[1];
-        if (!p) continue;
+    function extractFromText(text: string): void {
+        let m: RegExpExecArray | null;
+        while ((m = includeRe.exec(text)) !== null) {
+            let p = m[1];
+            if (!p) continue;
 
-        // Strip fragment identifiers
-        const hashIdx = p.indexOf("#");
-        if (hashIdx !== -1) p = p.substring(0, hashIdx);
-        if (!p) continue;
+            // Strip fragment identifiers
+            const hashIdx = p.indexOf("#");
+            if (hashIdx !== -1) p = p.substring(0, hashIdx);
+            if (!p) continue;
 
-        // Unescape spaces
-        p = p.replace(/\\ /g, " ");
+            // Unescape spaces
+            p = p.replace(/\\ /g, " ");
 
-        // Validate: must look like a path
-        const isValid =
-            p.startsWith("./") ||
-            p.startsWith("~/") ||
-            (p.startsWith("/") && p !== "/") ||
-            (!p.startsWith("@") &&
-                !/^[#%^&*()]+/.test(p) &&
-                /^[a-zA-Z0-9._-]/.test(p));
+            // Validate: must look like a path
+            const isValid =
+                p.startsWith("./") ||
+                p.startsWith("~/") ||
+                (p.startsWith("/") && p !== "/") ||
+                (!p.startsWith("@") &&
+                    !/^[#%^&*()]+/.test(p) &&
+                    /^[a-zA-Z0-9._-]/.test(p));
 
-        if (!isValid) continue;
+            if (!isValid) continue;
 
-        const resolved = resolveIncludePath(p, basePath);
-        paths.push(resolved);
+            found.add(resolveIncludePath(p, basePath));
+        }
     }
 
-    return paths;
+    function processElements(elements: Token[]): void {
+        for (const el of elements) {
+            // Skip code blocks and inline code
+            if (el.type === "code" || el.type === "codespan") continue;
+
+            // HTML comment residue may contain @paths
+            if (el.type === "html") {
+                const raw = el.raw ?? "";
+                const trimmed = raw.trimStart();
+                if (trimmed.startsWith("<!--") && trimmed.includes("-->")) {
+                    const residue = raw.replace(commentSpan, "");
+                    if (residue.trim().length > 0) {
+                        extractFromText(residue);
+                    }
+                }
+                continue;
+            }
+
+            // Process text nodes
+            if (el.type === "text" && typeof el.text === "string") {
+                extractFromText(el.text);
+            }
+
+            // Recurse into child tokens (links, list items, etc.)
+            if (
+                "tokens" in el &&
+                Array.isArray((el as { tokens?: Token[] }).tokens)
+            ) {
+                processElements((el as { tokens: Token[] }).tokens);
+            }
+
+            // List items may be in an `items` array
+            if (
+                "items" in el &&
+                Array.isArray((el as { items?: Token[] }).items)
+            ) {
+                processElements((el as { items: Token[] }).items);
+            }
+        }
+    }
+
+    processElements(tokens);
+    return [...found];
 }
 
 function resolveIncludePath(raw: string, basePath: string): string {
