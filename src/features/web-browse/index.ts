@@ -373,7 +373,12 @@ async function navigateTo(
 
 type BrowserMode = "bridge" | "isolated" | "cdp" | "applescript";
 
-const READ_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "applescript", "isolated"];
+const READ_FALLBACK_CHAIN: BrowserMode[] = [
+    "bridge",
+    "cdp",
+    "applescript",
+    "isolated",
+];
 const WRITE_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "isolated"];
 const LIST_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "applescript"];
 
@@ -404,9 +409,12 @@ async function resolveBrowserMode(
 ): Promise<BrowserMode> {
     if (await isModeAvailable(requested)) return requested;
 
-    const chain = operation === "list" ? LIST_FALLBACK_CHAIN
-        : operation === "read" ? READ_FALLBACK_CHAIN
-        : WRITE_FALLBACK_CHAIN;
+    const chain =
+        operation === "list"
+            ? LIST_FALLBACK_CHAIN
+            : operation === "read"
+              ? READ_FALLBACK_CHAIN
+              : WRITE_FALLBACK_CHAIN;
 
     for (const fallback of chain) {
         if (fallback === requested) continue;
@@ -420,18 +428,27 @@ async function resolveBrowserMode(
 
 async function isPdfPage(page: PlaywrightPage): Promise<boolean> {
     const url = page.url();
-    if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?")) return true;
+    if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?"))
+        return true;
     try {
-        const contentType = await page.evaluate(() => document.contentType ?? "");
+        const contentType = await page.evaluate(
+            () => document.contentType ?? ""
+        );
         if (contentType.includes("pdf")) return true;
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
     try {
-        const hasViewer = await page.evaluate(() =>
-            document.querySelector("embed[type='application/pdf']") !== null ||
-            document.querySelector("iframe[src*='.pdf']") !== null
+        const hasViewer = await page.evaluate(
+            () =>
+                document.querySelector("embed[type='application/pdf']") !==
+                    null ||
+                document.querySelector("iframe[src*='.pdf']") !== null
         );
         if (hasViewer) return true;
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
     return false;
 }
 
@@ -457,13 +474,25 @@ async function detectBotChallenge(page: PlaywrightPage): Promise<boolean> {
         return await page.evaluate(() => {
             const title = document.title?.toLowerCase() ?? "";
             const body = document.body?.innerText?.toLowerCase() ?? "";
-            if (title.includes("just a moment") || title.includes("attention required")) return true;
-            if (body.includes("checking your browser") && body.includes("cloudflare")) return true;
-            if (document.querySelector("#challenge-running") !== null) return true;
-            if (document.querySelector(".cf-browser-verification") !== null) return true;
-            if (title.includes("access denied") && body.includes("bot")) return true;
+            if (
+                title.includes("just a moment") ||
+                title.includes("attention required")
+            )
+                return true;
+            if (
+                body.includes("checking your browser") &&
+                body.includes("cloudflare")
+            )
+                return true;
+            if (document.querySelector("#challenge-running") !== null)
+                return true;
+            if (document.querySelector(".cf-browser-verification") !== null)
+                return true;
+            if (title.includes("access denied") && body.includes("bot"))
+                return true;
             if (body.includes("please verify you are a human")) return true;
-            if (body.includes("enable javascript and cookies to continue")) return true;
+            if (body.includes("enable javascript and cookies to continue"))
+                return true;
             return false;
         });
     } catch {
@@ -486,7 +515,9 @@ async function importCookies(
     url: string
 ): Promise<void> {
     if (!(await bridge.isAvailable())) {
-        throw new Error("Cannot import cookies: Pi Chrome Bridge is not available.");
+        throw new Error(
+            "Cannot import cookies: Pi Chrome Bridge is not available."
+        );
     }
 
     const tabs = await bridge.listTabs();
@@ -503,21 +534,34 @@ async function importCookies(
             "Network.getCookies",
             { urls: [url] }
         );
-        const cdpResponse = result as { cookies?: Array<{
-            name: string; value: string; domain: string; path?: string;
-            secure?: boolean; httpOnly?: boolean; sameSite?: string; expires?: number;
-        }> };
+        const cdpResponse = result as {
+            cookies?: Array<{
+                name: string;
+                value: string;
+                domain: string;
+                path?: string;
+                secure?: boolean;
+                httpOnly?: boolean;
+                sameSite?: string;
+                expires?: number;
+            }>;
+        };
 
         const cookies = cdpResponse.cookies ?? [];
         if (cookies.length === 0) return;
 
-        await context.addCookies(cookies.map((c) => ({
-            name: c.name, value: c.value, domain: c.domain,
-            path: c.path ?? "/", secure: c.secure ?? false,
-            httpOnly: c.httpOnly ?? false,
-            sameSite: (c.sameSite as "Strict" | "Lax" | "None") ?? "Lax",
-            expires: c.expires ?? -1,
-        })));
+        await context.addCookies(
+            cookies.map((c) => ({
+                name: c.name,
+                value: c.value,
+                domain: c.domain,
+                path: c.path ?? "/",
+                secure: c.secure ?? false,
+                httpOnly: c.httpOnly ?? false,
+                sameSite: (c.sameSite as "Strict" | "Lax" | "None") ?? "Lax",
+                expires: c.expires ?? -1,
+            }))
+        );
     } finally {
         await bridge.detachDebugger(targetTab.id).catch(() => {});
     }
@@ -536,7 +580,10 @@ async function navigateAndExtract(
     params: { selector?: string; url: string },
     consoleCollector: ConsoleCollector,
     browserMode: "isolated" | "cdp"
-): Promise<{ content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> }> {
+): Promise<{
+    content: Array<{ type: "text"; text: string }>;
+    details: Record<string, unknown>;
+}> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= MAX_NAVIGATION_RETRIES; attempt++) {
@@ -553,12 +600,19 @@ async function navigateAndExtract(
             }
 
             const result = await extractPageContent(
-                page, { ...params, format }, consoleCollector, browserMode
+                page,
+                { ...params, format },
+                consoleCollector,
+                browserMode
             );
 
             // Retry if text content is suspiciously empty (JS-heavy page)
             const text = result.content[0]?.text ?? "";
-            if (format === "text" && text.trim().length < 50 && attempt < MAX_NAVIGATION_RETRIES) {
+            if (
+                format === "text" &&
+                text.trim().length < 50 &&
+                attempt < MAX_NAVIGATION_RETRIES
+            ) {
                 continue;
             }
 
@@ -567,10 +621,13 @@ async function navigateAndExtract(
             lastError = err instanceof Error ? err : new Error(String(err));
             const msg = lastError.message;
             const isTransient =
-                msg.includes("Timeout") || msg.includes("net::ERR") ||
-                msg.includes("Navigation") || msg.includes("ERR_CONNECTION") ||
+                msg.includes("Timeout") ||
+                msg.includes("net::ERR") ||
+                msg.includes("Navigation") ||
+                msg.includes("ERR_CONNECTION") ||
                 msg.includes("ERR_NAME_NOT_RESOLVED");
-            if (!isTransient || attempt >= MAX_NAVIGATION_RETRIES) throw lastError;
+            if (!isTransient || attempt >= MAX_NAVIGATION_RETRIES)
+                throw lastError;
         }
     }
 
@@ -698,7 +755,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const mode = await resolveBrowserMode(params.browser ?? "bridge", "list");
+            const mode = await resolveBrowserMode(
+                params.browser ?? "bridge",
+                "list"
+            );
             let usedMode: string = "bridge";
             let tabs: Array<
                 | cdp.TabInfo
@@ -887,7 +947,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "read");
+            const browserMode = await resolveBrowserMode(
+                params.browser ?? "isolated",
+                "read"
+            );
             const format = params.format ?? "text";
             const session = params.session;
 
@@ -1091,7 +1154,8 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     try {
                         await importCookies(page.context(), params.url);
                     } catch (err) {
-                        const msg = err instanceof Error ? err.message : String(err);
+                        const msg =
+                            err instanceof Error ? err.message : String(err);
                         console.warn(`[tau] Cookie import failed: ${msg}`);
                     }
                 }
@@ -1165,7 +1229,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "write");
+            const browserMode = await resolveBrowserMode(
+                params.browser ?? "isolated",
+                "write"
+            );
             const session = params.session;
 
             if (browserMode === "applescript") {
@@ -1280,10 +1347,9 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 await (params.selector
                     ? page.locator(params.selector).screenshot({ path })
                     : page.screenshot({
-                        path,
-                        fullPage: params.fullPage !== false,
-                    })
-                );
+                          path,
+                          fullPage: params.fullPage !== false,
+                      }));
 
                 return {
                     content: [
@@ -1322,10 +1388,9 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 await (params.selector
                     ? page.locator(params.selector).screenshot({ path })
                     : page.screenshot({
-                        path,
-                        fullPage: params.fullPage !== false,
-                    })
-                );
+                          path,
+                          fullPage: params.fullPage !== false,
+                      }));
 
                 const errorCount = consoleCollector.messages.filter(
                     (m) => m.type === "error"
@@ -1465,7 +1530,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "write");
+            const browserMode = await resolveBrowserMode(
+                params.browser ?? "isolated",
+                "write"
+            );
             const returnFormat = params.returnFormat ?? "text";
             const session = params.session;
 
@@ -1830,7 +1898,12 @@ async function extractPageContent(
     if (await isPdfPage(page)) {
         const text = await getPdfText(page);
         return {
-            content: [{ type: "text", text: appendConsoleLog(text, consoleCollector) }],
+            content: [
+                {
+                    type: "text",
+                    text: appendConsoleLog(text, consoleCollector),
+                },
+            ],
             details: {
                 format: "pdf",
                 url: params.url,
@@ -2109,7 +2182,9 @@ async function executeActions(
             }
             case "network": {
                 if (!networkCollector) {
-                    outputs.push("(Network capture not available in this browser mode)");
+                    outputs.push(
+                        "(Network capture not available in this browser mode)"
+                    );
                     break;
                 }
                 const urlPattern = action.value || undefined;

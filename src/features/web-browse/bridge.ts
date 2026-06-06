@@ -301,7 +301,11 @@ async function sendCommand(
         // If the connection was stale (dead socket, ECONNREFUSED),
         // clear it and retry with a fresh connection.
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("ECONNREFUSED") || msg.includes("EOF") || msg.includes("destroyed")) {
+        if (
+            msg.includes("ECONNREFUSED") ||
+            msg.includes("EOF") ||
+            msg.includes("destroyed")
+        ) {
             connections.delete(socketPath);
             return await sendCommandInner(socketPath, method, params);
         }

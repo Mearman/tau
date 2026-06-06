@@ -124,10 +124,7 @@ export function formatNetworkEntries(
 
     if (!verbose) {
         return entries
-            .map(
-                (e) =>
-                    `${e.method} ${e.status} ${e.url} (${e.duration}ms)`
-            )
+            .map((e) => `${e.method} ${e.status} ${e.url} (${e.duration}ms)`)
             .join("\n");
     }
 
