@@ -367,22 +367,23 @@ void describe("discoverContextFiles — symlink handling", () => {
             path.join(testRoot, "shared", "base.md"),
             path.join(testRoot, "AGENTS.md")
         );
-        // An @include also points at shared/base.md
-        fs.writeFileSync(
-            path.join(testRoot, "sub", "AGENTS.md"),
-            "Sub\n@include @../shared/base.md"
+        // sub AGENTS.md also symlinks to the same real file
+        fs.symlinkSync(
+            path.join(testRoot, "shared", "base.md"),
+            path.join(testRoot, "sub", "AGENTS.md")
         );
 
-        const files = discoverContextFiles(testRoot);
-        // shared/base.md should appear only once despite being reached via
-        // both symlink (AGENTS.md) and @include
-        const baseCount = files.filter((f) =>
-            f.path.includes("base.md")
+        // Walk from sub — both root and sub have AGENTS.md pointing
+        // at the same real file. Should be deduped.
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        const agentsCount = files.filter((f) =>
+            f.path.endsWith("AGENTS.md")
         ).length;
+        // Both paths differ but realpath is the same — only one loaded
         assert.equal(
-            baseCount,
+            agentsCount,
             1,
-            "realpath dedup: shared/base.md loaded once"
+            "realpath dedup: symlinked AGENTS.md loaded once"
         );
     });
 
