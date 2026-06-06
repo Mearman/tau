@@ -57,7 +57,7 @@ import {
 
 // New integrations
 import { registerBookmark } from "./features/bookmark.ts";
-import { registerClaudeRules } from "./features/claude-rules.ts";
+import { registerContextFiles } from "./features/context-files.ts";
 import { registerCustomFooter } from "./features/custom-footer.ts";
 import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 import { registerGithubAutocomplete } from "./features/github-autocomplete.ts";
@@ -98,7 +98,7 @@ export default function (pi: ExtensionAPI) {
     registerToolsSelector(pi, state);
     registerNotifications(pi, state);
     registerBookmark(pi, state);
-    registerClaudeRules(pi, state);
+    registerContextFiles(pi, state);
     registerCustomFooter(pi, state);
     registerGitCheckpoint(pi, state);
     registerGithubAutocomplete(pi, state);
