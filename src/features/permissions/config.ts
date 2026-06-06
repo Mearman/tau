@@ -28,7 +28,7 @@ import type {
 function mapMode(mode: string): PermissionMode {
     switch (mode) {
         case "default":
-            return "ask";
+            return "allow";
         case "acceptEdits":
             return "edit";
         case "plan":
@@ -48,7 +48,7 @@ function mapMode(mode: string): PermissionMode {
             ) {
                 return mode;
             }
-            return "ask";
+            return "allow";
     }
 }
 

@@ -699,7 +699,7 @@ export async function initPermissionState(
 ): Promise<PermissionState> {
     const loaded = await loadAllPermissions(cwd);
     return {
-        mode: loaded.defaultMode ?? "ask",
+        mode: loaded.defaultMode ?? "allow",
         rules: loaded.rules,
         additionalDirectories: new Set(loaded.additionalDirectories),
         disableBypass: loaded.disableBypassPermissions,
