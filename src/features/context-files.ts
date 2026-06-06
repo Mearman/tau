@@ -351,7 +351,18 @@ function processFile(
 
     if (!fs.existsSync(normalised)) return [];
 
+    // Resolve symlinks so the same file reached via different symlink
+    // paths is only loaded once. Track both the original and real path.
+    let realPath: string;
+    try {
+        realPath = fs.realpathSync(normalised);
+    } catch {
+        return [];
+    }
+    if (processed.has(realPath)) return [];
+
     processed.add(normalised);
+    processed.add(realPath);
 
     let raw: string;
     try {
@@ -412,10 +423,24 @@ export function findMarkdownFiles(
 
     for (const entry of entries) {
         const rel = basePath ? `${basePath}/${entry.name}` : entry.name;
+        const fullPath = path.join(dir, entry.name);
 
-        if (entry.isDirectory()) {
-            results.push(...findMarkdownFiles(path.join(dir, entry.name), rel));
-        } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        // Resolve symlinks to determine actual type
+        let isDir = entry.isDirectory();
+        let isFile = entry.isFile();
+        if (entry.isSymbolicLink()) {
+            try {
+                const stat = fs.statSync(fullPath);
+                isDir = stat.isDirectory();
+                isFile = stat.isFile();
+            } catch {
+                continue;
+            }
+        }
+
+        if (isDir) {
+            results.push(...findMarkdownFiles(fullPath, rel));
+        } else if (isFile && entry.name.endsWith(".md")) {
             results.push(rel);
         }
     }
@@ -528,9 +553,16 @@ export function discoverContextFiles(cwd: string): ContextFile[] {
     for (const dir of dirs.reverse()) {
         const dirFiles = loadContextFilesFromDir(dir);
 
-        // Deduplicate by resolved path
+        // Deduplicate by resolved path (realpath for symlink safety)
         for (const file of dirFiles) {
-            if (!seen.has(file.path)) {
+            let realPath: string;
+            try {
+                realPath = fs.realpathSync(file.path);
+            } catch {
+                realPath = file.path;
+            }
+            if (!seen.has(realPath)) {
+                seen.add(realPath);
                 seen.add(file.path);
                 allFiles.push(file);
             }

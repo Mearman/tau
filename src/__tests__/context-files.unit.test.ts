@@ -342,3 +342,90 @@ void describe("discoverContextFiles", () => {
         );
     });
 });
+
+void describe("discoverContextFiles — symlink handling", () => {
+    const testRoot = path.join(tmpdir(), "tau-test-context-symlinks");
+
+    beforeEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+        fs.mkdirSync(path.join(testRoot, "shared"), { recursive: true });
+        fs.mkdirSync(path.join(testRoot, "sub"), { recursive: true });
+    });
+
+    afterEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+    });
+
+    void it("deduplicates when AGENTS.md is a symlink to the same file", () => {
+        // shared/base.md is the real file
+        fs.writeFileSync(
+            path.join(testRoot, "shared", "base.md"),
+            "Shared instructions"
+        );
+        // root AGENTS.md symlinks to shared/base.md
+        fs.symlinkSync(
+            path.join(testRoot, "shared", "base.md"),
+            path.join(testRoot, "AGENTS.md")
+        );
+        // An @include also points at shared/base.md
+        fs.writeFileSync(
+            path.join(testRoot, "sub", "AGENTS.md"),
+            "Sub\n@include @../shared/base.md"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        // shared/base.md should appear only once despite being reached via
+        // both symlink (AGENTS.md) and @include
+        const baseCount = files.filter((f) =>
+            f.path.includes("base.md")
+        ).length;
+        assert.equal(
+            baseCount,
+            1,
+            "realpath dedup: shared/base.md loaded once"
+        );
+    });
+
+    void it("does not follow circular symlinks", () => {
+        // Create a.md that @include's b.md, and symlink b.md → a.md
+        fs.writeFileSync(
+            path.join(testRoot, "a.md"),
+            "Content A\n@include @./b.md"
+        );
+        fs.symlinkSync(
+            path.join(testRoot, "a.md"),
+            path.join(testRoot, "b.md")
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "AGENTS.md"),
+            "Root\n@include @./a.md"
+        );
+
+        // Should not hang or duplicate — circular symlink resolved by
+        // realpath dedup
+        const files = discoverContextFiles(testRoot);
+        const aCount = files.filter((f) => f.path.includes("a.md")).length;
+        assert.equal(aCount, 1, "circular symlink: a.md loaded once");
+    });
+
+    void it("follows symlinks in rules directories", () => {
+        fs.mkdirSync(path.join(testRoot, ".agents", "rules"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, "shared", "rule.md"),
+            "Rule content"
+        );
+        fs.symlinkSync(
+            path.join(testRoot, "shared", "rule.md"),
+            path.join(testRoot, ".agents", "rules", "linked.md")
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const rule = files.find((f) =>
+            f.path.includes(".agents/rules/linked.md")
+        );
+        assert.ok(rule, "symlinked rule file discovered");
+        assert.equal(rule?.content, "Rule content");
+    });
+});
