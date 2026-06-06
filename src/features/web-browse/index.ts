@@ -161,6 +161,11 @@ import {
     appendConsoleLog,
     type ConsoleCollector,
 } from "./console-collector.ts";
+import {
+    collectNetwork,
+    formatNetworkEntries,
+    type NetworkCollector,
+} from "./network-collector.ts";
 import * as cdp from "./cdp.ts";
 import * as applescript from "./applescript.ts";
 import * as bridge from "./bridge.ts";
@@ -223,6 +228,16 @@ const SESSION_PARAM = Type.Optional(
             "Only honoured in browser: 'bridge' mode. In browser: 'isolated' mode " +
             "the browser is already fresh per call, so this is a no-op. " +
             "In browser: 'cdp' and 'applescript' modes it is rejected.",
+    })
+);
+
+const COOKIES_PARAM = Type.Optional(
+    Type.String({
+        description:
+            "Import cookies from a Chrome profile before navigating. " +
+            "Set to a profile name (e.g. 'Personal') to import cookies from the Pi Bridge, " +
+            "or 'auto' to import from the default profile. " +
+            "Only works in browser: 'isolated' mode and requires the Pi Chrome Bridge to be running.",
     })
 );
 
@@ -354,6 +369,214 @@ async function navigateTo(
     await page.goto(url, { waitUntil, timeout: TIMEOUT });
 }
 
+// ── Smart browser mode fallback ─────────────────────────────────────
+
+type BrowserMode = "bridge" | "isolated" | "cdp" | "applescript";
+
+const READ_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "applescript", "isolated"];
+const WRITE_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "isolated"];
+const LIST_FALLBACK_CHAIN: BrowserMode[] = ["bridge", "cdp", "applescript"];
+
+/** Check if a browser mode is available without throwing. */
+async function isModeAvailable(mode: BrowserMode): Promise<boolean> {
+    switch (mode) {
+        case "bridge":
+            return await bridge.isAvailable();
+        case "cdp": {
+            try {
+                await cdp.discover();
+                return true;
+            } catch {
+                return false;
+            }
+        }
+        case "applescript":
+            return await applescript.isAvailable();
+        case "isolated":
+            return true;
+    }
+}
+
+/** Get the effective browser mode with fallback. */
+async function resolveBrowserMode(
+    requested: BrowserMode,
+    operation: "read" | "write" | "list"
+): Promise<BrowserMode> {
+    if (await isModeAvailable(requested)) return requested;
+
+    const chain = operation === "list" ? LIST_FALLBACK_CHAIN
+        : operation === "read" ? READ_FALLBACK_CHAIN
+        : WRITE_FALLBACK_CHAIN;
+
+    for (const fallback of chain) {
+        if (fallback === requested) continue;
+        if (await isModeAvailable(fallback)) return fallback;
+    }
+
+    return requested; // Will throw with a helpful error downstream
+}
+
+// ── PDF detection ────────────────────────────────────────────────────
+
+async function isPdfPage(page: PlaywrightPage): Promise<boolean> {
+    const url = page.url();
+    if (url.toLowerCase().endsWith(".pdf") || url.includes(".pdf?")) return true;
+    try {
+        const contentType = await page.evaluate(() => document.contentType ?? "");
+        if (contentType.includes("pdf")) return true;
+    } catch { /* ignore */ }
+    try {
+        const hasViewer = await page.evaluate(() =>
+            document.querySelector("embed[type='application/pdf']") !== null ||
+            document.querySelector("iframe[src*='.pdf']") !== null
+        );
+        if (hasViewer) return true;
+    } catch { /* ignore */ }
+    return false;
+}
+
+async function getPdfText(page: PlaywrightPage): Promise<string> {
+    const text = await page.evaluate(() => {
+        const embed = document.querySelector("embed[type='application/pdf']");
+        if (embed) {
+            const pdfDoc = (embed as HTMLObjectElement).contentDocument;
+            if (pdfDoc) return pdfDoc.body?.innerText ?? "";
+        }
+        return document.body?.innerText ?? "";
+    });
+    if (text.trim().length > 0) {
+        return `Title: PDF Document\nURL: ${page.url()}\n\n---\n\n${text}`;
+    }
+    return `Title: PDF Document\nURL: ${page.url()}\n\n---\n\nThis is a PDF document. The built-in viewer did not expose extractable text.\nUse web_screenshot to capture a visual representation, or download the file\nand use a dedicated PDF parser.`;
+}
+
+// ── Bot detection ────────────────────────────────────────────────────
+
+async function detectBotChallenge(page: PlaywrightPage): Promise<boolean> {
+    try {
+        return await page.evaluate(() => {
+            const title = document.title?.toLowerCase() ?? "";
+            const body = document.body?.innerText?.toLowerCase() ?? "";
+            if (title.includes("just a moment") || title.includes("attention required")) return true;
+            if (body.includes("checking your browser") && body.includes("cloudflare")) return true;
+            if (document.querySelector("#challenge-running") !== null) return true;
+            if (document.querySelector(".cf-browser-verification") !== null) return true;
+            if (title.includes("access denied") && body.includes("bot")) return true;
+            if (body.includes("please verify you are a human")) return true;
+            if (body.includes("enable javascript and cookies to continue")) return true;
+            return false;
+        });
+    } catch {
+        return false;
+    }
+}
+
+async function waitForChallengeResolution(page: PlaywrightPage): Promise<void> {
+    const maxPolls = 30; // 15 seconds at 500ms intervals
+    for (let i = 0; i < maxPolls; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (!(await detectBotChallenge(page))) return;
+    }
+}
+
+// ── Cookie import ────────────────────────────────────────────────────
+
+async function importCookies(
+    context: import("patchright").BrowserContext,
+    url: string
+): Promise<void> {
+    if (!(await bridge.isAvailable())) {
+        throw new Error("Cannot import cookies: Pi Chrome Bridge is not available.");
+    }
+
+    const tabs = await bridge.listTabs();
+    if (tabs.length === 0) {
+        throw new Error("Cannot import cookies: no Chrome tabs found.");
+    }
+
+    const targetTab = tabs[0];
+
+    await bridge.attachDebugger(targetTab.id);
+    try {
+        const result = await bridge.sendCdp(
+            targetTab.id,
+            "Network.getCookies",
+            { urls: [url] }
+        );
+        const cdpResponse = result as { cookies?: Array<{
+            name: string; value: string; domain: string; path?: string;
+            secure?: boolean; httpOnly?: boolean; sameSite?: string; expires?: number;
+        }> };
+
+        const cookies = cdpResponse.cookies ?? [];
+        if (cookies.length === 0) return;
+
+        await context.addCookies(cookies.map((c) => ({
+            name: c.name, value: c.value, domain: c.domain,
+            path: c.path ?? "/", secure: c.secure ?? false,
+            httpOnly: c.httpOnly ?? false,
+            sameSite: (c.sameSite as "Strict" | "Lax" | "None") ?? "Lax",
+            expires: c.expires ?? -1,
+        })));
+    } finally {
+        await bridge.detachDebugger(targetTab.id).catch(() => {});
+    }
+}
+
+// ── Navigation with retry and bot detection ──────────────────────────
+
+const MAX_NAVIGATION_RETRIES = 2;
+const RETRY_DELAY_MS = 2_000;
+
+async function navigateAndExtract(
+    page: PlaywrightPage,
+    url: string,
+    waitUntil: "load" | "domcontentloaded" | "networkidle",
+    format: "text" | "markdown" | "structure",
+    params: { selector?: string; url: string },
+    consoleCollector: ConsoleCollector,
+    browserMode: "isolated" | "cdp"
+): Promise<{ content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> }> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= MAX_NAVIGATION_RETRIES; attempt++) {
+        if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        }
+
+        try {
+            await navigateTo(page, url, waitUntil);
+
+            // Detect and wait for Cloudflare/bot challenge pages
+            if (await detectBotChallenge(page)) {
+                await waitForChallengeResolution(page);
+            }
+
+            const result = await extractPageContent(
+                page, { ...params, format }, consoleCollector, browserMode
+            );
+
+            // Retry if text content is suspiciously empty (JS-heavy page)
+            const text = result.content[0]?.text ?? "";
+            if (format === "text" && text.trim().length < 50 && attempt < MAX_NAVIGATION_RETRIES) {
+                continue;
+            }
+
+            return result;
+        } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            const msg = lastError.message;
+            const isTransient =
+                msg.includes("Timeout") || msg.includes("net::ERR") ||
+                msg.includes("Navigation") || msg.includes("ERR_CONNECTION") ||
+                msg.includes("ERR_NAME_NOT_RESOLVED");
+            if (!isTransient || attempt >= MAX_NAVIGATION_RETRIES) throw lastError;
+        }
+    }
+
+    throw lastError ?? new Error("Navigation failed after retries");
+}
+
 async function getPageText(page: PlaywrightPage): Promise<string> {
     const result = await page.evaluate(() => {
         const title = document.title;
@@ -475,7 +698,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const mode = params.browser ?? "bridge";
+            const mode = await resolveBrowserMode(params.browser ?? "bridge", "list");
             let usedMode: string = "bridge";
             let tabs: Array<
                 | cdp.TabInfo
@@ -650,6 +873,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             browser: Type.Optional(BROWSER_PARAM),
             tabId: TAB_ID_PARAM,
             session: SESSION_PARAM,
+            cookies: COOKIES_PARAM,
         }),
         async execute(_toolCallId, params, signal) {
             if (!isFeatureEnabled(state, "web-browse")) {
@@ -663,7 +887,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = params.browser ?? "isolated";
+            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "read");
             const format = params.format ?? "text";
             const session = params.session;
 
@@ -861,13 +1085,25 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             try {
                 page = await createPage(browser);
                 const consoleCollector = collectConsole(page);
-                await navigateTo(page, params.url, params.waitUntil);
+
+                // Import cookies from Pi Chrome Bridge if requested
+                if (params.cookies) {
+                    try {
+                        await importCookies(page.context(), params.url);
+                    } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        console.warn(`[tau] Cookie import failed: ${msg}`);
+                    }
+                }
 
                 if (signal?.aborted) throw new Error("Cancelled");
 
-                return await extractPageContent(
+                return await navigateAndExtract(
                     page,
-                    { ...params, format },
+                    params.url,
+                    params.waitUntil ?? "domcontentloaded",
+                    format,
+                    { ...params },
                     consoleCollector,
                     "isolated"
                 );
@@ -906,6 +1142,12 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     default: true,
                 })
             ),
+            selector: Type.Optional(
+                Type.String({
+                    description:
+                        "CSS selector to screenshot a specific element. When set, only the matched element is captured.",
+                })
+            ),
             waitUntil: WAIT_UNTIL_PARAM,
             browser: Type.Optional(BROWSER_PARAM),
             tabId: TAB_ID_PARAM,
@@ -923,7 +1165,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = params.browser ?? "isolated";
+            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "write");
             const session = params.session;
 
             if (browserMode === "applescript") {
@@ -1035,10 +1277,13 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 const dir = path.substring(0, path.lastIndexOf("/"));
                 if (dir) mkdirSync(dir, { recursive: true });
 
-                await page.screenshot({
-                    path,
-                    fullPage: params.fullPage !== false,
-                });
+                await (params.selector
+                    ? page.locator(params.selector).screenshot({ path })
+                    : page.screenshot({
+                        path,
+                        fullPage: params.fullPage !== false,
+                    })
+                );
 
                 return {
                     content: [
@@ -1074,10 +1319,13 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                 const dir = path.substring(0, path.lastIndexOf("/"));
                 if (dir) mkdirSync(dir, { recursive: true });
 
-                await page.screenshot({
-                    path,
-                    fullPage: params.fullPage !== false,
-                });
+                await (params.selector
+                    ? page.locator(params.selector).screenshot({ path })
+                    : page.screenshot({
+                        path,
+                        fullPage: params.fullPage !== false,
+                    })
+                );
 
                 const errorCount = consoleCollector.messages.filter(
                     (m) => m.type === "error"
@@ -1150,6 +1398,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                         "console",
                         "evaluate",
                         "inject_script",
+                        "network",
                     ] as const),
                     selector: Type.Optional(
                         Type.String({ description: "CSS selector" })
@@ -1216,7 +1465,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     details: undefined,
                 };
             }
-            const browserMode = params.browser ?? "isolated";
+            const browserMode = await resolveBrowserMode(params.browser ?? "isolated", "write");
             const returnFormat = params.returnFormat ?? "text";
             const session = params.session;
 
@@ -1464,6 +1713,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             if (browserMode === "cdp") {
                 const page = await resolveCDPPage(params.tabId, signal);
                 const consoleCollector = collectConsole(page);
+                const networkCollector = collectNetwork(page);
 
                 if (params.url && params.url !== "about:blank") {
                     const currentUrl = page.url();
@@ -1479,7 +1729,8 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     page,
                     params.actions,
                     consoleCollector,
-                    signal
+                    signal,
+                    networkCollector
                 );
 
                 if (signal?.aborted) throw new Error("Cancelled");
@@ -1516,13 +1767,15 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             try {
                 page = await createPage(browser);
                 const consoleCollector = collectConsole(page);
+                const networkCollector = collectNetwork(page);
                 await navigateTo(page, params.url, params.waitUntil);
 
                 const outputs = await executeActions(
                     page,
                     params.actions,
                     consoleCollector,
-                    signal
+                    signal,
+                    networkCollector
                 );
 
                 if (signal?.aborted) throw new Error("Cancelled");
@@ -1573,6 +1826,22 @@ async function extractPageContent(
     content: Array<{ type: "text"; text: string }>;
     details: Record<string, unknown>;
 }> {
+    // PDF detection — extract text from PDFs instead of DOM walking
+    if (await isPdfPage(page)) {
+        const text = await getPdfText(page);
+        return {
+            content: [{ type: "text", text: appendConsoleLog(text, consoleCollector) }],
+            details: {
+                format: "pdf",
+                url: params.url,
+                browser: browserMode,
+                consoleErrors: consoleCollector.messages.filter(
+                    (m) => m.type === "error"
+                ).length,
+            },
+        };
+    }
+
     switch (params.format) {
         case "markdown": {
             const md: string = await page.evaluate(() =>
@@ -1727,7 +1996,8 @@ async function executeActions(
         expression?: string;
     }>,
     consoleCollector: ConsoleCollector,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    networkCollector?: NetworkCollector
 ): Promise<string[]> {
     const outputs: string[] = [];
 
@@ -1834,6 +2104,20 @@ async function executeActions(
                 } else if (inlineScript) {
                     await page.addScriptTag({ content: inlineScript });
                     outputs.push("Injected inline script");
+                }
+                break;
+            }
+            case "network": {
+                if (!networkCollector) {
+                    outputs.push("(Network capture not available in this browser mode)");
+                    break;
+                }
+                const urlPattern = action.value || undefined;
+                const filtered = networkCollector.getFiltered(urlPattern);
+                if (filtered.length === 0) {
+                    outputs.push("(no network requests captured)");
+                } else {
+                    outputs.push(formatNetworkEntries(filtered, true));
                 }
                 break;
             }
