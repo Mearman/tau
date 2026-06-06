@@ -337,6 +337,65 @@ export async function checkToolPermission(
         }
     }
 
+    // dontAsk: convert ask results to deny. Deny rules still apply.
+    // Ask rules, allow rules, and default prompting all resolve to deny
+    // since the user chose not to be prompted. This mirrors Claude Code's
+    // dontAsk behaviour (permissions.ts line ~503).
+    if (state.mode === "dontAsk") {
+        if (toolName === "Bash") {
+            const bashResult = checkBashPermissions(state.rules, input);
+            if (bashResult?.decision === "deny") {
+                return {
+                    block: true,
+                    reason: `Permission denied by rule: ${bashResult.rule.rule}`,
+                };
+            }
+            if (bashResult?.decision === "ask") {
+                return {
+                    block: true,
+                    reason:
+                        `Blocked by dontAsk mode: command requires approval. ` +
+                        `Rule: ${bashResult.rule.rule}\n` +
+                        `Command: ${input}`,
+                };
+            }
+            // Explicit allow rule or no rule — allow
+            if (bashResult?.decision === "allow") {
+                return { block: false };
+            }
+        } else {
+            // Non-bash: deny rules already checked in step 1
+            const allowRule = findMatchingRule(
+                state.rules,
+                "allow",
+                toolName,
+                normalised
+            );
+            if (allowRule) {
+                return { block: false };
+            }
+            const askRule = findMatchingRule(
+                state.rules,
+                "ask",
+                toolName,
+                normalised
+            );
+            if (askRule) {
+                return {
+                    block: true,
+                    reason:
+                        `Blocked by dontAsk mode: operation requires approval. ` +
+                        `Rule: ${askRule.rule}`,
+                };
+            }
+        }
+        // No matching rule — auto-deny in dontAsk mode (would need a prompt otherwise)
+        return {
+            block: true,
+            reason: `Blocked by dontAsk mode: ${toolName}${normalised ? ` for ${normalised}` : ""} would require permission approval.`,
+        };
+    }
+
     // bypassPermissions: skip default prompts (safety checks already handled above)
     // but ask rules still require explicit approval even in allow mode.
     if (state.mode === "allow") {
@@ -640,7 +699,7 @@ export async function initPermissionState(
 ): Promise<PermissionState> {
     const loaded = await loadAllPermissions(cwd);
     return {
-        mode: loaded.defaultMode ?? "allow",
+        mode: loaded.defaultMode ?? "ask",
         rules: loaded.rules,
         additionalDirectories: new Set(loaded.additionalDirectories),
         disableBypass: loaded.disableBypassPermissions,

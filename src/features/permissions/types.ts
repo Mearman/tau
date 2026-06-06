@@ -8,7 +8,7 @@
 
 // ─── Permission modes ────────────────────────────────────────────────
 
-export type PermissionMode = "ask" | "edit" | "plan" | "allow";
+export type PermissionMode = "ask" | "edit" | "plan" | "allow" | "dontAsk";
 
 // ─── Rule types ───────────────────────────────────────────────────────
 

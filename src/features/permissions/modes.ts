@@ -17,6 +17,7 @@ export const PERMISSION_MODES: PermissionMode[] = [
     "ask",
     "edit",
     "plan",
+    "dontAsk",
     "allow",
 ];
 
@@ -24,6 +25,7 @@ export const MODE_TITLES: Record<PermissionMode, string> = {
     ask: "Ask",
     edit: "Edit",
     plan: "Plan",
+    dontAsk: "Don't Ask",
     allow: "Allow",
 };
 
@@ -31,6 +33,7 @@ export const MODE_SHORT_TITLES: Record<PermissionMode, string> = {
     ask: "Ask",
     edit: "Edit",
     plan: "Plan",
+    dontAsk: "DontAsk",
     allow: "Allow",
 };
 
@@ -38,6 +41,7 @@ export const MODE_SYMBOLS: Record<PermissionMode, string> = {
     ask: "🔒",
     edit: "✎",
     plan: "⏸",
+    dontAsk: "⊘",
     allow: "✓",
 };
 
@@ -105,6 +109,8 @@ export function modeColour(mode: PermissionMode): PermModeColour {
             return "warning";
         case "plan":
             return "dim";
+        case "dontAsk":
+            return "warning";
         case "allow":
             return "error";
     }

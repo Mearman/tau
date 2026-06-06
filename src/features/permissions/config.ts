@@ -28,24 +28,27 @@ import type {
 function mapMode(mode: string): PermissionMode {
     switch (mode) {
         case "default":
-            return "allow";
+            return "ask";
         case "acceptEdits":
             return "edit";
         case "plan":
             return "plan";
         case "bypassPermissions":
             return "allow";
+        case "dontAsk":
+            return "dontAsk";
         default:
             // Accept tau names directly too
             if (
                 mode === "ask" ||
                 mode === "edit" ||
                 mode === "plan" ||
-                mode === "allow"
+                mode === "allow" ||
+                mode === "dontAsk"
             ) {
                 return mode;
             }
-            return "allow";
+            return "ask";
     }
 }
 
