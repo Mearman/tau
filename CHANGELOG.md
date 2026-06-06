@@ -1,3 +1,19 @@
+## [1.8.0](https://github.com/Mearman/tau/compare/v1.7.0...v1.8.0) (2026-06-06)
+
+### Features
+
+* **web-browse:** add network request/response collector ([0246c0a](https://github.com/Mearman/tau/commit/0246c0ab4abe898e2c9369d779cff9aa5c357e87))
+* **web-browse:** persist isolated browser across tool calls ([dcf255a](https://github.com/Mearman/tau/commit/dcf255ae234d672fe24aeae281166626ef18c241))
+* **web-browse:** smart mode fallback, persistent browser, and enhanced page handling ([67864a7](https://github.com/Mearman/tau/commit/67864a71448dcf949ed66d3bba97f9f64e85bd89))
+
+### Bug Fixes
+
+* **web-browse:** retry stale bridge socket connections ([001fe29](https://github.com/Mearman/tau/commit/001fe299e988422db55f8c3ad81184f532a66f60))
+
+### Styles
+
+* **web-browse:** apply consistent formatting to new code ([0bf5a91](https://github.com/Mearman/tau/commit/0bf5a9195d3117a748fc2ca7dd400f30aa028d53))
+
 ## [1.7.0](https://github.com/Mearman/tau/compare/v1.6.0...v1.7.0) (2026-06-05)
 
 ### Features

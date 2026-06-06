@@ -1,6 +1,6 @@
 {
   "name": "pi-tau",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "τ (tau = 2π): Quality-of-Life Extension for pi. Background tasks, notifications, pill-bar status, task management, and web browsing.",
   "type": "module",
   "keywords": [
