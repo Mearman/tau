@@ -135,6 +135,38 @@ void describe("extractIncludePaths", () => {
         );
         assert.deepEqual(result, ["/project/real.md"]);
     });
+
+    void it("extracts @path from inside a markdown link", () => {
+        const result = extractIncludePaths(
+            "See [API Conventions @../../docs/api.md](../../docs/api.md).",
+            "/project/packages/api/AGENTS.md"
+        );
+        assert.deepEqual(result, ["/project/docs/api.md"]);
+    });
+
+    void it("extracts @path when link text is just the @path", () => {
+        const result = extractIncludePaths(
+            "See [@../../docs/api.md](../../docs/api.md).",
+            "/project/packages/api/AGENTS.md"
+        );
+        assert.deepEqual(result, ["/project/docs/api.md"]);
+    });
+
+    void it("extracts @path from [@path](path) at start of line", () => {
+        const result = extractIncludePaths(
+            "[@./shared.md](./shared.md)",
+            "/project/packages/api/AGENTS.md"
+        );
+        assert.deepEqual(result, ["/project/packages/api/shared.md"]);
+    });
+
+    void it("does not include plain markdown links without @", () => {
+        const result = extractIncludePaths(
+            "See [API Conventions](../../docs/api.md).",
+            "/project/AGENTS.md"
+        );
+        assert.deepEqual(result, []);
+    });
 });
 
 void describe("findMarkdownFiles", () => {
