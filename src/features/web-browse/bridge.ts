@@ -202,7 +202,12 @@ export async function isAvailable(): Promise<boolean> {
 function getConnection(socketPath: string): Promise<SocketConnection> {
     const existing = connections.get(socketPath);
     if (existing && !existing.socket.destroyed) {
-        return Promise.resolve(existing);
+        // Health check: verify the socket is still writable
+        if (!existing.socket.writable) {
+            connections.delete(socketPath);
+        } else {
+            return Promise.resolve(existing);
+        }
     }
 
     return new Promise((resolve, reject) => {
@@ -284,8 +289,27 @@ function processBuffer(conn: SocketConnection): void {
     }
 }
 
-/** Send a command to a specific native host socket. */
+/** Send a command to a specific native host socket. Retries once on connection failure. */
 async function sendCommand(
+    socketPath: string,
+    method: string,
+    params?: unknown
+): Promise<unknown> {
+    try {
+        return await sendCommandInner(socketPath, method, params);
+    } catch (err) {
+        // If the connection was stale (dead socket, ECONNREFUSED),
+        // clear it and retry with a fresh connection.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ECONNREFUSED") || msg.includes("EOF") || msg.includes("destroyed")) {
+            connections.delete(socketPath);
+            return await sendCommandInner(socketPath, method, params);
+        }
+        throw err;
+    }
+}
+
+async function sendCommandInner(
     socketPath: string,
     method: string,
     params?: unknown
