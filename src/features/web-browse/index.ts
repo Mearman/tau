@@ -226,7 +226,73 @@ const SESSION_PARAM = Type.Optional(
     })
 );
 
-// ── Isolated browser helpers (lazy playwright) ───────────────────────
+// ── Persistent isolated browser ────────────────────────────────────
+//
+// Instead of launching a fresh Chromium per call, the browser instance
+// persists across calls within a session. Pages are created and closed
+// per call, but the browser process stays alive for 60 seconds of
+// inactivity before shutting down.
+
+const BROWSER_IDLE_TIMEOUT_MS = 60_000;
+
+let persistentBrowser: PlaywrightBrowser | undefined;
+let browserIdleTimer: ReturnType<typeof setTimeout> | undefined;
+let browserLaunching: Promise<PlaywrightBrowser> | undefined;
+
+/** Get or launch the persistent isolated browser. Serialises concurrent launches. */
+async function getBrowser(): Promise<PlaywrightBrowser> {
+    // If a browser exists and is connected, reuse it
+    if (persistentBrowser) {
+        try {
+            persistentBrowser.contexts(); // health check
+            resetIdleTimer();
+            return persistentBrowser;
+        } catch {
+            // Dead — discard
+            persistentBrowser = undefined;
+        }
+    }
+
+    // If a launch is already in flight, wait for it
+    if (browserLaunching) {
+        return browserLaunching;
+    }
+
+    // Launch a new browser
+    browserLaunching = launchBrowser();
+    try {
+        persistentBrowser = await browserLaunching;
+        resetIdleTimer();
+        return persistentBrowser;
+    } finally {
+        browserLaunching = undefined;
+    }
+}
+
+/** Reset the idle shutdown timer. Call on every browser use. */
+function resetIdleTimer(): void {
+    if (browserIdleTimer) clearTimeout(browserIdleTimer);
+    browserIdleTimer = setTimeout(() => {
+        if (persistentBrowser) {
+            persistentBrowser.close().catch(() => {});
+            persistentBrowser = undefined;
+        }
+        browserIdleTimer = undefined;
+    }, BROWSER_IDLE_TIMEOUT_MS);
+}
+
+/** Shut down the persistent browser immediately (session shutdown). */
+async function shutdownBrowser(): Promise<void> {
+    if (browserIdleTimer) {
+        clearTimeout(browserIdleTimer);
+        browserIdleTimer = undefined;
+    }
+    if (persistentBrowser) {
+        const b = persistentBrowser;
+        persistentBrowser = undefined;
+        await b.close().catch(() => {});
+    }
+}
 
 async function launchBrowser(): Promise<PlaywrightBrowser> {
     const pw = await getPlaywright();
@@ -355,6 +421,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
         cdp.disconnect();
         bridge.disconnect();
         tabCache.clear();
+        await shutdownBrowser();
     });
 
     // ── chrome_list TTL cache ────────────────────────────────────────
@@ -789,9 +856,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             }
 
             // ── Isolated mode (default) ──────────────────────────────
-            const browser = await launchBrowser();
+            const browser = await getBrowser();
+            let page: PlaywrightPage | undefined;
             try {
-                const page = await createPage(browser);
+                page = await createPage(browser);
                 const consoleCollector = collectConsole(page);
                 await navigateTo(page, params.url, params.waitUntil);
 
@@ -804,7 +872,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     "isolated"
                 );
             } finally {
-                await browser.close();
+                if (page) await page.close().catch(() => {});
             }
         },
     });
@@ -991,9 +1059,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             }
 
             // ── Isolated mode (default) ──────────────────────────────
-            const browser = await launchBrowser();
+            const browser = await getBrowser();
+            let page: PlaywrightPage | undefined;
             try {
-                const page = await createPage(browser);
+                page = await createPage(browser);
                 const consoleCollector = collectConsole(page);
                 await navigateTo(page, params.url, params.waitUntil);
 
@@ -1035,7 +1104,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     },
                 };
             } finally {
-                await browser.close();
+                if (page) await page.close().catch(() => {});
             }
         },
     });
@@ -1442,9 +1511,10 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
             }
 
             // ── Isolated mode (default) ──────────────────────────────
-            const browser = await launchBrowser();
+            const browser = await getBrowser();
+            let page: PlaywrightPage | undefined;
             try {
-                const page = await createPage(browser);
+                page = await createPage(browser);
                 const consoleCollector = collectConsole(page);
                 await navigateTo(page, params.url, params.waitUntil);
 
@@ -1482,7 +1552,7 @@ export function registerWebBrowse(pi: ExtensionAPI, state: TauState): void {
                     },
                 };
             } finally {
-                await browser.close();
+                if (page) await page.close().catch(() => {});
             }
         },
     });
