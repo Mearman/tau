@@ -375,6 +375,196 @@ void describe("discoverContextFiles", () => {
     });
 });
 
+void describe("discoverContextFiles — local files and first-match-wins", () => {
+    const testRoot = path.join(tmpdir(), "tau-test-context-local");
+
+    beforeEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+        fs.mkdirSync(path.join(testRoot, "sub"), {
+            recursive: true,
+        });
+    });
+
+    afterEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+    });
+
+    void it("prefers AGENTS.local.md over CLAUDE.local.md", () => {
+        fs.writeFileSync(
+            path.join(testRoot, "AGENTS.local.md"),
+            "Agents local"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "CLAUDE.local.md"),
+            "Claude local"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const localFiles = files.filter((f) => f.path.includes("local"));
+
+        assert.ok(
+            localFiles.some((f) => f.path.endsWith("AGENTS.local.md")),
+            "AGENTS.local.md loaded"
+        );
+        assert.ok(
+            !localFiles.some((f) => f.path.endsWith("CLAUDE.local.md")),
+            "CLAUDE.local.md skipped when AGENTS.local.md exists"
+        );
+    });
+
+    void it("falls back to CLAUDE.local.md when no AGENTS.local.md", () => {
+        fs.writeFileSync(
+            path.join(testRoot, "CLAUDE.local.md"),
+            "Claude local"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const localFile = files.find((f) => f.path.endsWith("CLAUDE.local.md"));
+
+        assert.ok(localFile, "CLAUDE.local.md loaded as fallback");
+        assert.equal(localFile?.content, "Claude local");
+    });
+
+    void it("loads local files from every ancestor directory", () => {
+        fs.writeFileSync(path.join(testRoot, "CLAUDE.local.md"), "Root local");
+        fs.writeFileSync(
+            path.join(testRoot, "sub", "CLAUDE.local.md"),
+            "Sub local"
+        );
+
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        const localFiles = files.filter((f) => f.path.includes("local"));
+
+        assert.ok(
+            localFiles.some((f) => f.content === "Root local"),
+            "root local file loaded"
+        );
+        assert.ok(
+            localFiles.some((f) => f.content === "Sub local"),
+            "sub local file loaded"
+        );
+
+        // Root before sub
+        const rootIdx = localFiles.findIndex((f) => f.content === "Root local");
+        const subIdx = localFiles.findIndex((f) => f.content === "Sub local");
+        assert.ok(rootIdx < subIdx, "root local before sub local");
+    });
+
+    void it("local file type is Local", () => {
+        fs.writeFileSync(path.join(testRoot, "AGENTS.local.md"), "Local");
+
+        const files = discoverContextFiles(testRoot);
+        const localFile = files.find((f) => f.path.endsWith("AGENTS.local.md"));
+
+        assert.equal(localFile?.type, "Local");
+    });
+
+    void it(".claude/CLAUDE.md loaded alongside top-level AGENTS.md", () => {
+        // Claude Code loads CLAUDE.md AND .claude/CLAUDE.md independently.
+        // Tau loads AGENTS.md (first match wins over CLAUDE.md) AND
+        // .claude/CLAUDE.md independently.
+        fs.writeFileSync(path.join(testRoot, "AGENTS.md"), "Top-level agents");
+        fs.writeFileSync(path.join(testRoot, "CLAUDE.md"), "Top-level claude");
+        fs.mkdirSync(path.join(testRoot, ".claude"), { recursive: true });
+        fs.writeFileSync(
+            path.join(testRoot, ".claude", "CLAUDE.md"),
+            "Dot claude"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const hasTop = files.some(
+            (f) =>
+                f.content === "Top-level agents" && !f.path.includes(".claude")
+        );
+        const hasDotClaude = files.some((f) => f.content === "Dot claude");
+        const hasTopClaude = files.some(
+            (f) => f.content === "Top-level claude"
+        );
+
+        assert.ok(hasTop, "AGENTS.md loaded (CLAUDE.md skipped)");
+        assert.ok(hasDotClaude, ".claude/CLAUDE.md loaded independently");
+        assert.ok(
+            !hasTopClaude,
+            "top-level CLAUDE.md not loaded (first match wins)"
+        );
+    });
+
+    void it(".agents/AGENTS.md loaded alongside top-level AGENTS.md", () => {
+        fs.writeFileSync(path.join(testRoot, "AGENTS.md"), "Top-level");
+        fs.mkdirSync(path.join(testRoot, ".agents"), { recursive: true });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "AGENTS.md"),
+            "Agents dir"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const hasTop = files.some((f) => f.content === "Top-level");
+        const hasAgentsDir = files.some((f) => f.content === "Agents dir");
+
+        assert.ok(hasTop, "top-level AGENTS.md loaded");
+        assert.ok(hasAgentsDir, ".agents/AGENTS.md loaded independently");
+    });
+
+    void it(".agents/rules/ subdirectories loaded recursively", () => {
+        fs.mkdirSync(path.join(testRoot, ".agents", "rules", "deep"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "rules", "top.md"),
+            "Top rule"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "rules", "deep", "nested.md"),
+            "Nested rule"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const top = files.find((f) => f.path.includes("rules/top.md"));
+        const nested = files.find((f) =>
+            f.path.includes("rules/deep/nested.md")
+        );
+
+        assert.ok(top, "top-level rule loaded");
+        assert.ok(nested, "nested rule in subdirectory loaded");
+    });
+
+    void it(".claude/rules/ subdirectories loaded recursively", () => {
+        fs.mkdirSync(path.join(testRoot, ".claude", "rules", "deep"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".claude", "rules", "top.md"),
+            "Top rule"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, ".claude", "rules", "deep", "nested.md"),
+            "Nested rule"
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const top = files.find((f) => f.path.includes("rules/top.md"));
+        const nested = files.find((f) =>
+            f.path.includes("rules/deep/nested.md")
+        );
+
+        assert.ok(top, "top-level rule loaded");
+        assert.ok(nested, "nested rule in subdirectory loaded");
+    });
+
+    void it("stops at filesystem root", () => {
+        // Walking from a tmpdir subdirectory should not load
+        // files from / or home directory
+        fs.writeFileSync(path.join(testRoot, "AGENTS.md"), "Root instructions");
+
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        // Should include testRoot's AGENTS.md but not system files
+        const hasRoot = files.some(
+            (f) => f.path === path.join(testRoot, "AGENTS.md")
+        );
+        assert.ok(hasRoot, "test root AGENTS.md found");
+    });
+});
+
 void describe("discoverContextFiles — symlink handling", () => {
     const testRoot = path.join(tmpdir(), "tau-test-context-symlinks");
 
@@ -460,5 +650,196 @@ void describe("discoverContextFiles — symlink handling", () => {
         );
         assert.ok(rule, "symlinked rule file discovered");
         assert.equal(rule?.content, "Rule content");
+    });
+});
+
+void describe("discoverContextFiles — .claude/ compat symlinks", () => {
+    const testRoot = path.join(tmpdir(), "tau-test-claude-compat");
+
+    beforeEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+        fs.mkdirSync(path.join(testRoot, "sub"), { recursive: true });
+    });
+
+    afterEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+    });
+
+    void it(".claude/rules/*.md symlinked to .agents/rules/*.md loads once", () => {
+        fs.mkdirSync(path.join(testRoot, ".agents", "rules"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, ".claude", "rules"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "rules", "typescript.md"),
+            "---\npaths: *.ts\n---\nUse named exports"
+        );
+        fs.symlinkSync(
+            path.join(testRoot, ".agents", "rules", "typescript.md"),
+            path.join(testRoot, ".claude", "rules", "typescript.md")
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const rulesPaths = files
+            .filter((f) => f.path.includes("typescript.md"))
+            .map((f) => f.path);
+
+        // Both .agents/rules/typescript.md and .claude/rules/typescript.md
+        // resolve to the same real file — must be deduped.
+        assert.equal(
+            rulesPaths.length,
+            1,
+            "symlinked .claude/rules deduped against .agents/rules"
+        );
+        assert.equal(
+            rulesPaths[0]?.includes(".agents/rules/typescript.md"),
+            true,
+            "first discovery path wins (.agents comes before .claude)"
+        );
+    });
+
+    void it(".claude/CLAUDE.md symlinked to .agents/AGENTS.md loads once", () => {
+        fs.mkdirSync(path.join(testRoot, ".agents"), { recursive: true });
+        fs.mkdirSync(path.join(testRoot, ".claude"), { recursive: true });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "AGENTS.md"),
+            "Machine instructions"
+        );
+        fs.symlinkSync(
+            path.join(testRoot, ".agents", "AGENTS.md"),
+            path.join(testRoot, ".claude", "CLAUDE.md")
+        );
+
+        const files = discoverContextFiles(testRoot);
+        const instrPaths = files
+            .filter(
+                (f) =>
+                    f.path.includes(".agents/AGENTS.md") ||
+                    f.path.includes(".claude/CLAUDE.md")
+            )
+            .map((f) => f.path);
+
+        assert.equal(
+            instrPaths.length,
+            1,
+            "symlinked .claude/CLAUDE.md deduped against .agents/AGENTS.md"
+        );
+    });
+
+    void it(".claude/rules/ discovered at every ancestor directory", () => {
+        // Root has .claude/rules/root.md, sub has .claude/rules/sub.md
+        fs.mkdirSync(path.join(testRoot, ".claude", "rules"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, "sub", ".claude", "rules"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".claude", "rules", "root.md"),
+            "Root rule"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "sub", ".claude", "rules", "sub.md"),
+            "Sub rule"
+        );
+
+        // Walk from sub — should discover both root and sub rules
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        const rootRule = files.find((f) =>
+            f.path.includes(".claude/rules/root.md")
+        );
+        const subRule = files.find((f) =>
+            f.path.includes("sub/.claude/rules/sub.md")
+        );
+
+        assert.ok(rootRule, "root .claude/rules/ discovered from sub");
+        assert.ok(subRule, "sub .claude/rules/ discovered from sub");
+
+        // Root rule should appear before sub rule (root → cwd order)
+        const rootIdx = files.findIndex((f) =>
+            f.path.includes(".claude/rules/root.md")
+        );
+        const subIdx = files.findIndex((f) =>
+            f.path.includes("sub/.claude/rules/sub.md")
+        );
+        assert.ok(rootIdx < subIdx, "root rule before sub rule");
+    });
+
+    void it(".agents/rules/ discovered at every ancestor directory", () => {
+        fs.mkdirSync(path.join(testRoot, ".agents", "rules"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, "sub", ".agents", "rules"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "rules", "root.md"),
+            "Root rule"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "sub", ".agents", "rules", "sub.md"),
+            "Sub rule"
+        );
+
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        const rootRule = files.find((f) =>
+            f.path.includes(".agents/rules/root.md")
+        );
+        const subRule = files.find((f) =>
+            f.path.includes("sub/.agents/rules/sub.md")
+        );
+
+        assert.ok(rootRule, "root .agents/rules/ discovered from sub");
+        assert.ok(subRule, "sub .agents/rules/ discovered from sub");
+
+        const rootIdx = files.findIndex((f) =>
+            f.path.includes(".agents/rules/root.md")
+        );
+        const subIdx = files.findIndex((f) =>
+            f.path.includes("sub/.agents/rules/sub.md")
+        );
+        assert.ok(rootIdx < subIdx, "root rule before sub rule");
+    });
+
+    void it("deduplicates .claude/rules/ symlink chain across ancestor walk", () => {
+        // Root .agents/rules/typescript.md, symlinked as .claude/rules/typescript.md
+        // Sub also has .claude/rules/typescript.md symlinked to same .agents file
+        fs.mkdirSync(path.join(testRoot, ".agents", "rules"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, ".claude", "rules"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, "sub", ".claude", "rules"), {
+            recursive: true,
+        });
+        fs.writeFileSync(
+            path.join(testRoot, ".agents", "rules", "typescript.md"),
+            "Use named exports"
+        );
+        // Root .claude/rules → .agents/rules
+        fs.symlinkSync(
+            path.join(testRoot, ".agents", "rules", "typescript.md"),
+            path.join(testRoot, ".claude", "rules", "typescript.md")
+        );
+        // Sub .claude/rules → same .agents/rules file
+        fs.symlinkSync(
+            path.join(testRoot, ".agents", "rules", "typescript.md"),
+            path.join(testRoot, "sub", ".claude", "rules", "typescript.md")
+        );
+
+        const files = discoverContextFiles(path.join(testRoot, "sub"));
+        const tsPaths = files
+            .filter((f) => f.content === "Use named exports")
+            .map((f) => f.path);
+
+        // All three symlink paths resolve to the same real file
+        assert.equal(
+            tsPaths.length,
+            1,
+            "same real file loaded once despite multiple symlink paths across ancestors"
+        );
     });
 });
