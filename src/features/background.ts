@@ -1294,12 +1294,12 @@ async function executeTmuxForeground(
                 2000,
                 tmuxCtx.outputFile
             );
-            // Clean up tmux window and session if empty
+            // Clean up tmux window. Keep the session alive so the next
+            // spawnInTmux call reuses it via new-window instead of creating
+            // a fresh session — avoids tmux server state accumulation across
+            // hundreds of create/destroy cycles which causes fork()+waitpid()
+            // deadlocks (child exits but parent waitpid never returns).
             killWindow(tmuxCtx.windowId);
-            // Kill the session if this was the last window (cleans up idle initial shells)
-            execSafe(
-                `tmux kill-session -t ${shellQuote(tmuxCtx.session)} 2>/dev/null`
-            );
             if (initialResult !== 0 && initialResult !== null) {
                 throw new Error(
                     output || `Command exited with code ${initialResult}`
@@ -1412,9 +1412,8 @@ async function executeTmuxForeground(
             tmuxCtx.outputFile
         );
         killWindow(tmuxCtx.windowId);
-        execSafe(
-            `tmux kill-session -t ${shellQuote(tmuxCtx.session)} 2>/dev/null`
-        );
+        // Session is intentionally kept alive — reuse avoids tmux server
+        // state accumulation that causes waitpid deadlocks.
 
         if (raceResult.code !== 0 && raceResult.code !== null) {
             throw new Error(
@@ -1435,4 +1434,4 @@ async function executeTmuxForeground(
 
 // ─── Helpers used by executeTmuxForeground ──────────────────────────
 
-import { checkExitCode, killWindow, execSafe, shellQuote } from "../tmux.ts";
+import { checkExitCode, killWindow } from "../tmux.ts";
