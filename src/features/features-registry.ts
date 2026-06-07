@@ -128,13 +128,6 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
     {
-        id: "github-autocomplete",
-        label: "GitHub autocomplete",
-        description: "Mention GitHub issues and PRs with @",
-        group: "Integrations",
-        defaultOn: true,
-    },
-    {
         id: "web-browse",
         label: "Web browse",
         description: "Browse, fetch, screenshot, and click web pages",

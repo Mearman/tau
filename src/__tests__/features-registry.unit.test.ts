@@ -109,7 +109,6 @@ void describe("feature registry", () => {
         for (const id of [
             "claude-rules",
             "git-checkpoint",
-            "github-autocomplete",
             "web-browse",
             "callbacks",
         ]) {
