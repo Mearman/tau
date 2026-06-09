@@ -50,6 +50,13 @@ void describe("parseFrontmatter", () => {
         assert.equal(result.globs, undefined);
         assert.equal(result.content, "body");
     });
+
+    void it("accepts applies-to as a synonym for paths", () => {
+        const input = "---\napplies-to: *.ts, *.tsx\n---\nbody";
+        const result = parseFrontmatter(input);
+        assert.deepEqual(result.globs, ["*.ts", "*.tsx"]);
+        assert.equal(result.content, "body");
+    });
 });
 
 void describe("stripHtmlComments", () => {

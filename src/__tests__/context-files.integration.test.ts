@@ -8,6 +8,9 @@ import { TauState } from "../state.ts";
 
 void describe("context-files register + events", () => {
     const testDir = path.join(tmpdir(), "tau-test-context-files-reg");
+    // Fake home dir for the global rules scan. Must exist and contain no
+    // .agents/rules/ or .claude/rules/ so the global scan is a no-op.
+    const fakeHome = path.join(tmpdir(), "tau-test-context-files-fake-home");
 
     beforeEach(() => {
         fs.mkdirSync(path.join(testDir, ".agents", "rules"), {
@@ -16,10 +19,12 @@ void describe("context-files register + events", () => {
         fs.mkdirSync(path.join(testDir, ".claude", "rules"), {
             recursive: true,
         });
+        fs.mkdirSync(fakeHome, { recursive: true });
     });
 
     afterEach(() => {
         fs.rmSync(testDir, { recursive: true, force: true });
+        fs.rmSync(fakeHome, { recursive: true, force: true });
     });
 
     void it("registers session_start and before_agent_start handlers", () => {
@@ -30,7 +35,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
         assert.ok(handlers["session_start"]);
         assert.ok(handlers["before_agent_start"]);
     });
@@ -54,7 +59,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
 
         const ctx = {
             cwd: testDir,
@@ -89,7 +94,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
 
         // Trigger session_start
         const sessionCtx = {
@@ -120,7 +125,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
 
         const sessionCtx = {
             cwd: testDir,
@@ -153,7 +158,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
 
         const sessionCtx = {
             cwd: testDir,
@@ -183,7 +188,7 @@ void describe("context-files register + events", () => {
             },
         } as never;
 
-        registerContextFiles(pi, new TauState());
+        registerContextFiles(pi, new TauState(), fakeHome);
 
         const sessionCtx = {
             cwd: testDir,

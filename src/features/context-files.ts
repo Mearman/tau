@@ -177,8 +177,11 @@ export function parseFrontmatter(raw: string): {
     const frontmatterText = match[1] ?? "";
     const body = raw.slice(match[0].length);
 
-    // Extract paths: field — handle both comma-separated string and YAML list
-    const pathsMatch = frontmatterText.match(/^paths:\s*(.+)$/m);
+    // Extract paths: field — handle both comma-separated string and YAML list.
+    // `applies-to:` is accepted as a synonym for the more conventional `paths:`.
+    const pathsMatch = frontmatterText.match(
+        /^(?:paths|applies-to):\s*(.+)$/m
+    );
     if (!pathsMatch) return { content: body };
 
     const rawPaths = pathsMatch[1]?.trim();
@@ -628,14 +631,29 @@ function loadContextFilesFromDir(dir: string): ContextFile[] {
 
     // .agents/rules/*.md and .claude/rules/*.md — deduped by canonical name,
     // .agents/ wins on conflict.
+    files.push(...loadRulesFromDir(dir, processed));
+
+    return files;
+}
+
+/**
+ * Load rule files from `<parent>/.agents/rules/` and `<parent>/.claude/rules/`,
+ * dedupe by canonical name, and process each unique file. Used both by
+ * `loadContextFilesFromDir` (per-project) and by `discoverContextFiles` (for
+ * the global `~/.agents/rules/` and `~/.claude/rules/` directories).
+ */
+function loadRulesFromDir(
+    parent: string,
+    processed: Set<string>
+): ContextFile[] {
+    const files: ContextFile[] = [];
     const { rules: dedupedRules } = dedupeByCanonicalName(
-        path.join(dir, ".agents", "rules"),
-        path.join(dir, ".claude", "rules")
+        path.join(parent, ".agents", "rules"),
+        path.join(parent, ".claude", "rules")
     );
     for (const rule of dedupedRules) {
         files.push(...processFile(rule.path, "Project", processed));
     }
-
     return files;
 }
 
@@ -646,9 +664,32 @@ function loadContextFilesFromDir(dir: string): ContextFile[] {
  * Returns files ordered root → cwd (outermost first, innermost last for
  * highest priority).
  */
-export function discoverContextFiles(cwd: string): ContextFile[] {
+export function discoverContextFiles(
+    cwd: string,
+    homeDir: string = homedir()
+): ContextFile[] {
     const allFiles: ContextFile[] = [];
     const seen = new Set<string>();
+
+    // ── Global rules scan ──────────────────────────────────────────
+    // The user's home directory rules apply everywhere. Walk them first so
+    // their realpaths are in `seen` before the per-project walk; project
+    // rules override via realpath dedupe.
+    const globalProcessed = new Set<string>();
+    const globalRules = loadRulesFromDir(homeDir, globalProcessed);
+    for (const file of globalRules) {
+        let realPath: string;
+        try {
+            realPath = fs.realpathSync(file.path);
+        } catch {
+            realPath = file.path;
+        }
+        if (!seen.has(realPath)) {
+            seen.add(realPath);
+            seen.add(file.path);
+            allFiles.push(file);
+        }
+    }
 
     // Collect directories from cwd up to root
     const dirs: string[] = [];
@@ -717,13 +758,17 @@ function formatContextFiles(files: ContextFile[]): string {
 
 // ─── Feature registration ────────────────────────────────────────────
 
-export function registerContextFiles(pi: ExtensionAPI, state: TauState): void {
+export function registerContextFiles(
+    pi: ExtensionAPI,
+    state: TauState,
+    homeDir: string = homedir()
+): void {
     let contextFiles: ContextFile[] = [];
 
     pi.on("session_start", async (_event, ctx) => {
         if (!isFeatureEnabled(state, "instructions")) return;
 
-        contextFiles = discoverContextFiles(ctx.cwd);
+        contextFiles = discoverContextFiles(ctx.cwd, homeDir);
 
         if (contextFiles.length > 0) {
             const projectCount = contextFiles.filter(
