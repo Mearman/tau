@@ -8,6 +8,7 @@ import {
     stripHtmlComments,
     extractIncludePaths,
     findMarkdownFiles,
+    dedupeByCanonicalName,
     discoverContextFiles,
 } from "../features/context-files.ts";
 
@@ -191,6 +192,147 @@ void describe("findMarkdownFiles", () => {
 
     void it("returns empty for nonexistent directory", () => {
         assert.deepEqual(findMarkdownFiles("/nonexistent"), []);
+    });
+});
+
+void describe("dedupeByCanonicalName", () => {
+    const testRoot = path.join(tmpdir(), "tau-test-dedupe-rules");
+
+    beforeEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+        fs.mkdirSync(path.join(testRoot, "agents", "rules", "sub"), {
+            recursive: true,
+        });
+        fs.mkdirSync(path.join(testRoot, "claude", "rules", "sub"), {
+            recursive: true,
+        });
+    });
+
+    afterEach(() => {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+    });
+
+    void it("returns empty when neither directory exists", () => {
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.deepEqual(result.rules, []);
+        assert.deepEqual(result.conflicts, []);
+    });
+
+    void it("loads all files from .agents/ when .claude/ is empty", () => {
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "a.md"), "");
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "b.md"), "");
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 2);
+        assert.equal(result.conflicts.length, 0);
+        assert.equal(result.rules[0]?.source, "agents");
+        assert.equal(result.rules[1]?.source, "agents");
+    });
+
+    void it("loads all files from .claude/ when .agents/ is empty", () => {
+        fs.writeFileSync(path.join(testRoot, "claude", "rules", "a.md"), "");
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 1);
+        assert.equal(result.conflicts.length, 0);
+        assert.equal(result.rules[0]?.source, "claude");
+    });
+
+    void it("loads both when canonical names are distinct", () => {
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "a.md"), "");
+        fs.writeFileSync(path.join(testRoot, "claude", "rules", "b.md"), "");
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 2);
+        assert.equal(result.conflicts.length, 0);
+        // .agents/ first, then .claude/
+        assert.equal(result.rules[0]?.canonicalName, "a");
+        assert.equal(result.rules[0]?.source, "agents");
+        assert.equal(result.rules[1]?.canonicalName, "b");
+        assert.equal(result.rules[1]?.source, "claude");
+    });
+
+    void it("drops .claude/ on canonical-name conflict, .agents/ wins", () => {
+        fs.writeFileSync(
+            path.join(testRoot, "agents", "rules", "style.md"),
+            "agents"
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "claude", "rules", "style.md"),
+            "claude"
+        );
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 1);
+        assert.equal(result.rules[0]?.source, "agents");
+        assert.equal(
+            result.rules[0]?.droppedPath,
+            path.join(testRoot, "claude", "rules", "style.md")
+        );
+        assert.equal(result.conflicts.length, 1);
+        assert.equal(result.conflicts[0]?.canonicalName, "style");
+    });
+
+    void it("uses relative path as canonical name for nested files", () => {
+        fs.writeFileSync(
+            path.join(testRoot, "agents", "rules", "sub", "deep.md"),
+            ""
+        );
+        fs.writeFileSync(
+            path.join(testRoot, "claude", "rules", "sub", "deep.md"),
+            ""
+        );
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 1);
+        assert.equal(result.rules[0]?.canonicalName, "sub/deep");
+        assert.equal(result.conflicts.length, 1);
+    });
+
+    void it("does not conflict on nested files with different parents", () => {
+        fs.writeFileSync(
+            path.join(testRoot, "agents", "rules", "sub", "a.md"),
+            ""
+        );
+        fs.writeFileSync(path.join(testRoot, "claude", "rules", "b.md"), "");
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        assert.equal(result.rules.length, 2);
+        assert.equal(result.conflicts.length, 0);
+    });
+
+    void it("preserves .agents/ ordering on dedup", () => {
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "z.md"), "");
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "a.md"), "");
+        fs.writeFileSync(path.join(testRoot, "agents", "rules", "m.md"), "");
+        fs.writeFileSync(path.join(testRoot, "claude", "rules", "a.md"), "");
+        const result = dedupeByCanonicalName(
+            path.join(testRoot, "agents", "rules"),
+            path.join(testRoot, "claude", "rules")
+        );
+        // findMarkdownFiles returns entries in directory order (alphabetical
+        // on most filesystems), so .agents/ files come back sorted: a, m, z.
+        // The .claude/ 'a' is dropped on conflict.
+        assert.equal(result.rules.length, 3);
+        assert.deepEqual(
+            result.rules.map((r) => r.canonicalName),
+            ["a", "m", "z"]
+        );
     });
 });
 

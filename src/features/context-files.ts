@@ -501,6 +501,87 @@ export function findMarkdownFiles(
     return results;
 }
 
+// ─── Rule deduplication ──────────────────────────────────────────────
+
+/**
+ * A single rule file after dedup, with its canonical name and source.
+ * The canonical name is the path relative to the rules dir minus the `.md`
+ * suffix — so `style.md` → `"style"`, `sub/foo.md` → `"sub/foo"`.
+ */
+export interface DedupedRule {
+    /** Absolute path of the chosen file (`.agents/` wins on conflict). */
+    path: string;
+    /** The dedupe key. */
+    canonicalName: string;
+    /** Which directory the file came from. */
+    source: "agents" | "claude";
+    /** The `.claude/` path that was dropped, if any. */
+    droppedPath?: string;
+}
+
+/** A collision between an `.agents/` rule and a same-named `.claude/` rule. */
+export interface RuleConflict {
+    agents: string;
+    claude: string;
+    canonicalName: string;
+}
+
+/**
+ * Walk two parallel rule directories (e.g. `<parent>/.agents/rules/` and
+ * `<parent>/.claude/rules/`) and return the deduplicated file list, with
+ * `.agents/` winning on canonical-name conflict. The order is:
+ *  1. All `.agents/` files in `findMarkdownFiles` order.
+ *  2. All `.claude/` files whose canonical name was not in `.agents/`.
+ *
+ * Symlinks where both dirs point at the same real file will be deduped
+ * by realpath inside `processFile`; this helper only resolves the
+ * naming-collision case.
+ */
+export function dedupeByCanonicalName(
+    agentsDir: string,
+    claudeDir: string
+): { rules: DedupedRule[]; conflicts: RuleConflict[] } {
+    const listDir = (dir: string, source: "agents" | "claude") => {
+        if (!fs.existsSync(dir)) return [];
+        return findMarkdownFiles(dir).map((rel) => ({
+            path: path.join(dir, rel),
+            canonicalName: rel.replace(/\.md$/, ""),
+            source,
+        }));
+    };
+
+    const agentsFiles = listDir(agentsDir, "agents");
+    const claudeFiles = listDir(claudeDir, "claude");
+
+    const agentsByName = new Map<string, string>();
+    for (const f of agentsFiles) {
+        agentsByName.set(f.canonicalName, f.path);
+    }
+
+    const rules: DedupedRule[] = agentsFiles.map((f) => ({ ...f }));
+    const conflicts: RuleConflict[] = [];
+
+    for (const f of claudeFiles) {
+        const agentsPath = agentsByName.get(f.canonicalName);
+        if (agentsPath !== undefined) {
+            conflicts.push({
+                agents: agentsPath,
+                claude: f.path,
+                canonicalName: f.canonicalName,
+            });
+            // Mark the .agents/ entry as having dropped its .claude/ twin.
+            const winning = rules.find(
+                (r) => r.canonicalName === f.canonicalName
+            );
+            if (winning) winning.droppedPath = f.path;
+        } else {
+            rules.push({ ...f });
+        }
+    }
+
+    return { rules, conflicts };
+}
+
 /**
  * Load all context files from a single directory.
  * Checks top-level files, .agents/ subdirectory, and .claude/ subdirectory.
@@ -537,21 +618,6 @@ function loadContextFilesFromDir(dir: string): ContextFile[] {
     );
     files.push(...agentsSub);
 
-    // .agents/rules/*.md
-    const agentsRulesDir = path.join(dir, ".agents", "rules");
-    if (fs.existsSync(agentsRulesDir)) {
-        const ruleFiles = findMarkdownFiles(agentsRulesDir);
-        for (const rel of ruleFiles) {
-            files.push(
-                ...processFile(
-                    path.join(agentsRulesDir, rel),
-                    "Project",
-                    processed
-                )
-            );
-        }
-    }
-
     // .claude/CLAUDE.md
     const claudeSub = processFile(
         path.join(dir, ".claude", "CLAUDE.md"),
@@ -560,19 +626,14 @@ function loadContextFilesFromDir(dir: string): ContextFile[] {
     );
     files.push(...claudeSub);
 
-    // .claude/rules/*.md
-    const claudeRulesDir = path.join(dir, ".claude", "rules");
-    if (fs.existsSync(claudeRulesDir)) {
-        const ruleFiles = findMarkdownFiles(claudeRulesDir);
-        for (const rel of ruleFiles) {
-            files.push(
-                ...processFile(
-                    path.join(claudeRulesDir, rel),
-                    "Project",
-                    processed
-                )
-            );
-        }
+    // .agents/rules/*.md and .claude/rules/*.md — deduped by canonical name,
+    // .agents/ wins on conflict.
+    const { rules: dedupedRules } = dedupeByCanonicalName(
+        path.join(dir, ".agents", "rules"),
+        path.join(dir, ".claude", "rules")
+    );
+    for (const rule of dedupedRules) {
+        files.push(...processFile(rule.path, "Project", processed));
     }
 
     return files;
