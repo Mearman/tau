@@ -56,10 +56,14 @@ Background tasks, notifications, plan mode, presets, and other enhancements for 
 
 - `/session-name [name]` — set a friendly name that appears in the session selector
 
-### Claude Rules
+### Instructions
 
-- Automatically scans `.claude/rules/*.md` (recursively) and injects the list into the system prompt
+- Automatically scans `.agents/rules/*.md` and `.claude/rules/*.md` (recursively) and injects them into the system prompt
+- Also loads `AGENTS.md` / `CLAUDE.md` (and `*.local.md` variants), `.agents/AGENTS.md`, `.claude/CLAUDE.md`
+- Walks from cwd up to root, with `~/.agents/rules/` and `~/.claude/rules/` as global fallbacks
+- Both `.agents/` and `.claude/` are walked; `.agents/` wins on canonical-name conflict
 - The agent can `read` specific rule files when relevant
+- Memory: `MEMORY.md` from `.agents/memory/` or `.claude/memory/` is auto-loaded (when present); topic files are read on demand
 
 ### Custom Footer
 
@@ -140,7 +144,7 @@ On-disk format in `.pi/settings.json`:
 }
 ```
 
-Some features (claude-rules, git-checkpoint) bootstrap at session start; toggling them at runtime requires `/reload` to take full effect. The TUI flags these with a reload indicator.
+Some features (instructions, git-checkpoint) bootstrap at session start; toggling them at runtime requires `/reload` to take full effect. The TUI flags these with a reload indicator.
 
 ## Tools
 
@@ -211,7 +215,7 @@ src/
     tools-selector.ts   /tools command, state persistence
     notifications.ts    /notifications, agent_end notification, DnD support
     bookmark.ts         /bookmark, /unbookmark
-    claude-rules.ts     .claude/rules/ scanning
+    context-files.ts    project instructions, rules, and memory loading
     custom-footer.ts    /footer command
     git-checkpoint.ts   git stash checkpointing
     github-autocomplete.ts  # issue autocomplete

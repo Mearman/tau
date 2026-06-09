@@ -112,18 +112,12 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
 
-    // ── Integrations (5) ──────────────────────────────────────────
+    // ── Integrations (4) ──────────────────────────────────────────
     {
-        id: "claude-rules",
-        label: "Claude rules",
-        description: "Auto-load CLAUDE.md from the working directory",
-        group: "Integrations",
-        defaultOn: true,
-    },
-    {
-        id: "git-checkpoint",
-        label: "Git checkpoint",
-        description: "Auto git stash before risky operations",
+        id: "instructions",
+        label: "Instructions",
+        description:
+            "Auto-load project instructions, rules, and memory from .agents/ and .claude/ at all scopes",
         group: "Integrations",
         defaultOn: true,
     },

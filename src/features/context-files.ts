@@ -660,7 +660,7 @@ export function registerContextFiles(pi: ExtensionAPI, state: TauState): void {
     let contextFiles: ContextFile[] = [];
 
     pi.on("session_start", async (_event, ctx) => {
-        if (!isFeatureEnabled(state, "claude-rules")) return;
+        if (!isFeatureEnabled(state, "instructions")) return;
 
         contextFiles = discoverContextFiles(ctx.cwd);
 
