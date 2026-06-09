@@ -106,7 +106,13 @@ void describe("feature registry", () => {
             assert.ok(isKnownFeature(id), `missing: ${id}`);
         }
         // Integrations (5)
-        for (const id of ["instructions", "web-browse", "callbacks"]) {
+        for (const id of [
+            "instructions",
+            "memory",
+            "web-browse",
+            "web-search",
+            "callbacks",
+        ]) {
             assert.ok(isKnownFeature(id), `missing: ${id}`);
         }
         // Background (3)

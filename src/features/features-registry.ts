@@ -112,12 +112,20 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
 
-    // ── Integrations (4) ──────────────────────────────────────────
+    // ── Integrations (5) ──────────────────────────────────────────
     {
         id: "instructions",
         label: "Instructions",
         description:
             "Auto-load project instructions, rules, and memory from .agents/ and .claude/ at all scopes",
+        group: "Integrations",
+        defaultOn: true,
+    },
+    {
+        id: "memory",
+        label: "Memory",
+        description:
+            "Auto-load MEMORY.md from .agents/memory/ and .claude/memory/ at all scopes; topic files read on demand",
         group: "Integrations",
         defaultOn: true,
     },

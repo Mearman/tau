@@ -58,8 +58,8 @@ import {
 // New integrations
 import { registerBookmark } from "./features/bookmark.ts";
 import { registerContextFiles } from "./features/context-files.ts";
+import { registerMemory } from "./features/memory.ts";
 import { registerCustomFooter } from "./features/custom-footer.ts";
-import { registerGitCheckpoint } from "./features/git-checkpoint.ts";
 // Handoff disabled — import { registerHandoff } from "./features/handoff.ts";
 import { registerGoal } from "./features/goal.ts";
 import { registerWorkflow } from "./features/workflow.ts";
@@ -98,8 +98,8 @@ export default function (pi: ExtensionAPI) {
     registerNotifications(pi, state);
     registerBookmark(pi, state);
     registerContextFiles(pi, state);
+    registerMemory(pi, state);
     registerCustomFooter(pi, state);
-    registerGitCheckpoint(pi, state);
     // registerHandoff(pi, state); // disabled
     registerPreset(pi, state);
     registerLoop(pi, state);
