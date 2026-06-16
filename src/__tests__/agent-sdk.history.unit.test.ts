@@ -10,15 +10,25 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildHistoryIterable } from "../features/agent-sdk/provider.ts";
+import {
+    buildHistoryIterable,
+    buildIncrementalPrompt,
+} from "../features/agent-sdk/provider.ts";
 import type {
     AssistantMessage,
     Context,
+    Message,
     ToolResultMessage,
     UserMessage,
 } from "@earendil-works/pi-ai";
 
-type Block = { type: string; text?: string; source?: unknown };
+type Block = {
+    type: string;
+    text?: string;
+    source?: unknown;
+    tool_use_id?: string;
+    is_error?: boolean;
+};
 
 async function content(context: Context): Promise<Block[]> {
     for await (const msg of buildHistoryIterable(context, new Map())) {
@@ -147,5 +157,56 @@ void describe("buildHistoryIterable (flattened single user message)", () => {
         const text = joined(blocks);
         assert.match(text, /TOOL RESULT \(Read, id=t1\):/);
         assert.match(text, /file contents/);
+    });
+});
+
+async function incremental(
+    messages: Message[],
+    sentCount: number
+): Promise<Block[]> {
+    for await (const msg of buildIncrementalPrompt(
+        messages,
+        sentCount,
+        new Map()
+    )) {
+        return msg.message.content as Block[];
+    }
+    throw new Error("no message yielded");
+}
+
+void describe("buildIncrementalPrompt (session mode)", () => {
+    void it("skips assistant turns and sends only new user/tool-result messages", async () => {
+        // sentCount=1: messages[0] (user "hello") already in the SDK session;
+        // messages[1] is the SDK's assistant turn (skip); messages[2..] are new.
+        const blocks = await incremental(
+            [
+                user("hello"),
+                assistant([{ type: "text", text: "hi" }]),
+                toolResult("toolu_1", "the file contents"),
+                user("next question"),
+            ],
+            1
+        );
+        // No assistant text leaked through.
+        assert.equal(
+            blocks.find((b) => b.type === "text" && b.text === "hi"),
+            undefined
+        );
+        // Tool result is a real tool_result block keyed by the SDK's tool_use id.
+        const result = blocks.find((b) => b.type === "tool_result");
+        assert.equal(result?.tool_use_id, "toolu_1");
+        // The new user message is present.
+        assert.ok(
+            blocks.some((b) => b.type === "text" && b.text === "next question")
+        );
+    });
+
+    void it("yields an empty user message when there is nothing new", async () => {
+        const blocks = await incremental([user("hello")], 1);
+        assert.deepEqual(
+            blocks.map((b) => b.type),
+            ["text"]
+        );
+        assert.equal(blocks[0]?.text, "");
     });
 });

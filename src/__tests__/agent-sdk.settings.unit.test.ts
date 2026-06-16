@@ -19,6 +19,21 @@ void describe("parseAgentSdkSettings", () => {
         assert.equal(parseAgentSdkSettings({})?.authMode, "subscription");
     });
 
+    void it("defaults mode to flatten", () => {
+        assert.equal(parseAgentSdkSettings({})?.mode, "flatten");
+    });
+
+    void it("reads an explicit session mode", () => {
+        assert.equal(
+            parseAgentSdkSettings({ mode: "session" })?.mode,
+            "session"
+        );
+    });
+
+    void it("ignores an invalid mode and keeps the flatten default", () => {
+        assert.equal(parseAgentSdkSettings({ mode: "bogus" })?.mode, "flatten");
+    });
+
     void it("reads an explicit apiKey authMode", () => {
         assert.equal(
             parseAgentSdkSettings({ authMode: "apiKey" })?.authMode,

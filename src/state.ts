@@ -146,4 +146,14 @@ export class TauState {
     permissionModeHintUntil = 0;
     /** Whether the user has interacted since session start. */
     hasInteracted = false;
+
+    // ── Agent SDK provider (session mode) ────────────────────────────
+    // Per-pi-session cursor for the SDK session-resume mode. The SDK session
+    // holds the real assistant turns; each turn the provider sends only the
+    // new user/tool-result messages since `sentCount`, so the SDK accumulates
+    // a proper alternating transcript. Keyed by pi's session id.
+    agentSdkSessions = new Map<
+        string,
+        { sdkSessionId: string | undefined; sentCount: number }
+    >();
 }

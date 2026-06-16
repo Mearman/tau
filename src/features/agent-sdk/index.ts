@@ -115,7 +115,10 @@ export function registerAgentSdkProvider(
         // (e.g. switching authMode) take effect without a reload. The read is
         // two small files; negligible against an SDK subprocess spawn.
         const settings = loadAgentSdkSettings(process.cwd());
-        return streamClaudeAgentSdk(model, context, options, { settings });
+        return streamClaudeAgentSdk(model, context, options, {
+            settings,
+            sdkSessions: state.agentSdkSessions,
+        });
     };
 
     pi.registerProvider(PROVIDER_ID, {

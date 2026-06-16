@@ -1,18 +1,27 @@
 /**
  * Claude Agent SDK provider — the streaming core.
  *
- * The single big idea (spec improvement #1 over the reference extension): we
- * replay pi's conversation as a real, structured, alternating-turn transcript
- * via an `AsyncIterable<SDKUserMessage>` with `shouldQuery` control, instead of
- * flattening the whole context into one labelled string. That preserves prompt
- * caching and reasoning continuity across turns.
+ * Two history modes, selectable via `tau.claudeAgentSdk.mode`:
  *
- * Tool execution is deny-and-reroute: the SDK runs in `permissionMode:
- * "dontAsk"` with a `canUseTool` that always denies, so `tool_use` blocks
- * stream out for pi to execute natively (tau's bash override, permissions, etc.
- * all apply). Billing is decided by which loop makes the completion call — the
- * SDK subprocess — so subscription vs API-key is an auth concern, not a tool
- * concern. See {@link ./auth.ts}.
+ * - `"flatten"` (default): the whole transcript is sent each turn as one user
+ *   message. The Agent SDK's prompt iterable only accepts `role: "user"`
+ *   messages ("Expected message role 'user', got 'assistant'"), so assistant
+ *   turns are rendered as labelled text. Robust to pi's session tree and
+ *   compaction; caching still works because the flattened block prefix is
+ *   append-only and thus stable.
+ * - `"session"`: the SDK keeps the real alternating transcript (thinking
+ *   signatures, tool_use/tool_result pairs) and each turn we send only the new
+ *   user/tool-result messages since the last turn, resuming the SDK session by
+ *   id. Avoids flattening assistant turns. A fork or compact resets to a fresh
+ *   SDK session (seeded with a flattened snapshot), because the SDK session is
+ *   linear and can't follow pi's tree/compaction.
+ *
+ * Tool execution is deny-and-reroute in both modes: the SDK runs in
+ * `permissionMode: "dontAsk"` with a `canUseTool` that always denies, so
+ * `tool_use` blocks stream out for pi to execute natively (tau's bash override,
+ * permissions, etc. all apply). Billing is decided by which loop makes the
+ * completion call — the SDK subprocess — so subscription vs API-key is an auth
+ * concern, not a tool concern. See {@link ./auth.ts}.
  *
  * Event mapping mirrors pi-ai's built-in `anthropic-messages` provider: the
  * SDK's `stream_event` messages wrap the raw Anthropic SSE events, and we apply
@@ -27,6 +36,7 @@ import type {
     AssistantMessageEventStream,
     Context,
     ImageContent,
+    Message,
     Model,
     SimpleStreamOptions,
     TextContent,
@@ -271,6 +281,55 @@ function safeStringify(value: unknown): string {
     } catch {
         return "{}";
     }
+}
+
+/**
+ * Build the `session`-mode prompt: only the user/tool-result messages pi has
+ * added since the SDK session was last advanced (`sentCount`). Assistant turns
+ * are skipped — the SDK session already holds them (with thinking signatures
+ * and tool_use blocks). Tool results become real `tool_result` blocks keyed by
+ * the SDK's tool_use id, so the resumed session accumulates a proper
+ * alternating transcript instead of a flattened blob.
+ */
+export function buildIncrementalPrompt(
+    messages: Message[],
+    sentCount: number,
+    _customToolNameToSdk: ReadonlyMap<string, string>
+): AsyncIterable<SDKUserMessage> {
+    async function* generate(): AsyncGenerator<SDKUserMessage> {
+        const blocks: ContentBlockParam[] = [];
+        for (let i = sentCount; i < messages.length; i++) {
+            const msg = messages[i];
+            if (msg === undefined) continue;
+            if (msg.role === "assistant") {
+                // The SDK generated this turn last call; it's in the session.
+                continue;
+            }
+            if (msg.role === "user") {
+                for (const block of toUserContentBlocks(msg.content)) {
+                    blocks.push(block);
+                }
+            } else {
+                // toolResult — pair it with the SDK's prior tool_use by id.
+                blocks.push({
+                    type: "tool_result",
+                    tool_use_id: msg.toolCallId,
+                    content: toUserContentBlocks(msg.content),
+                    is_error: msg.isError,
+                });
+            }
+        }
+        if (blocks.length === 0) {
+            blocks.push({ type: "text", text: "" });
+        }
+        yield {
+            type: "user",
+            message: { role: "user", content: blocks },
+            parent_tool_use_id: null,
+            session_id: REPLAY_SESSION_ID,
+        };
+    }
+    return generate();
 }
 
 // ── Thinking configuration ────────────────────────────────────────────
@@ -733,6 +792,15 @@ function buildCustomToolServers(
 
 interface StreamDeps {
     settings: AgentSdkSettings;
+    /**
+     * Per-pi-session SDK session cursor, used only in `session` mode. The
+     * provider reads the prior `{ sdkSessionId, sentCount }` to resume and
+     * writes the updated cursor after a successful turn.
+     */
+    sdkSessions: Map<
+        string,
+        { sdkSessionId: string | undefined; sentCount: number }
+    >;
 }
 
 /**
@@ -791,16 +859,52 @@ async function runAgentSdkQuery(
 
     try {
         const resolved = resolveSdkTools(context);
-        const prompt = buildHistoryIterable(
-            context,
-            resolved.customToolNameToSdk
-        );
         const mcpServers = buildCustomToolServers(sdk, resolved);
         const thinking = resolveThinkingOptions(
             model,
             options?.reasoning,
             options?.thinkingBudgets
         );
+
+        // Session mode: resume the SDK session and send only new user/tool-
+        // result messages. Flatten mode: send the whole transcript. pi's
+        // session id keys the SDK session; a missing/stale cursor (first turn
+        // or a compact that shrank the transcript) seeds a fresh session.
+        const piSessionId = options?.sessionId;
+        const sessionMode =
+            deps.settings.mode === "session" && piSessionId !== undefined;
+        let resumeId: string | undefined;
+        let cursorSentCount = 0;
+        let prompt: AsyncIterable<SDKUserMessage>;
+        if (sessionMode) {
+            const cursor = deps.sdkSessions.get(piSessionId);
+            if (
+                cursor !== undefined &&
+                cursor.sdkSessionId !== undefined &&
+                cursor.sentCount <= context.messages.length
+            ) {
+                resumeId = cursor.sdkSessionId;
+                cursorSentCount = context.messages.length;
+                prompt = buildIncrementalPrompt(
+                    context.messages,
+                    cursor.sentCount,
+                    resolved.customToolNameToSdk
+                );
+            } else {
+                deps.sdkSessions.delete(piSessionId);
+                cursorSentCount = context.messages.length;
+                prompt = buildHistoryIterable(
+                    context,
+                    resolved.customToolNameToSdk
+                );
+            }
+        } else {
+            prompt = buildHistoryIterable(
+                context,
+                resolved.customToolNameToSdk
+            );
+        }
+        let capturedSdkSessionId: string | undefined;
 
         const queryOptions: Options = {
             cwd:
@@ -832,6 +936,7 @@ async function runAgentSdkQuery(
                 ? { extraArgs: { "strict-mcp-config": null } }
                 : {}),
             ...(mcpServers ? { mcpServers } : {}),
+            ...(resumeId ? { resume: resumeId } : {}),
             ...thinking,
         };
 
@@ -844,13 +949,17 @@ async function runAgentSdkQuery(
                 started = true;
             }
 
-            // Auth determinism: check the init message exactly once.
-            if (!authVerified && isSystemInitMessage(message)) {
-                assertSubscriptionAuth(
-                    message.apiKeySource,
-                    deps.settings.authMode
-                );
-                authVerified = true;
+            // Auth determinism + (session mode) capture the SDK session id.
+            if (isSystemInitMessage(message)) {
+                if (message.session_id)
+                    capturedSdkSessionId = message.session_id;
+                if (!authVerified) {
+                    assertSubscriptionAuth(
+                        message.apiKeySource,
+                        deps.settings.authMode
+                    );
+                    authVerified = true;
+                }
             }
 
             if (isStreamEventMessage(message)) {
@@ -879,6 +988,19 @@ async function runAgentSdkQuery(
 
         if (options?.signal?.aborted) {
             throw new Error("Operation aborted");
+        }
+
+        // Advance the session-mode cursor so the next turn resumes this SDK
+        // session and only sends messages added after this point.
+        if (
+            sessionMode &&
+            piSessionId !== undefined &&
+            capturedSdkSessionId !== undefined
+        ) {
+            deps.sdkSessions.set(piSessionId, {
+                sdkSessionId: capturedSdkSessionId,
+                sentCount: cursorSentCount,
+            });
         }
 
         stream.push({

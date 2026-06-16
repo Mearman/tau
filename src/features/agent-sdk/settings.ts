@@ -35,8 +35,24 @@ export type SettingSource = "user" | "project" | "local";
  */
 export type AuthMode = "subscription" | "apiKey";
 
+/**
+ * How conversation history is fed to the SDK.
+ *
+ * - `"flatten"` (default): each turn sends the whole transcript flattened into
+ *   one user message. Robust to pi's session tree and compaction; tool
+ *   execution stays native to pi (tau's bash override, permissions).
+ * - `"session"`: the SDK keeps the real alternating transcript (thinking
+ *   signatures, tool_use/tool_result pairs) and each turn we send only the new
+ *   user/tool-result messages since the last turn. Avoids flattening assistant
+ *   turns. Best for a single linear conversation; a fork or compact resets to a
+ *   fresh SDK session (falling back to a flattened seed) because the SDK session
+ *   is linear and can't follow pi's tree/compaction.
+ */
+export type HistoryMode = "flatten" | "session";
+
 export interface AgentSdkSettings {
     authMode: AuthMode;
+    mode: HistoryMode;
     /** When set, overrides the default setting-sources passed to the SDK. */
     settingSources?: SettingSource[];
     /** Pass `--strict-mcp-config` so the SDK ignores auto-loaded MCP configs. */
@@ -47,12 +63,17 @@ export interface AgentSdkSettings {
 
 const DEFAULT_SETTINGS: AgentSdkSettings = {
     authMode: "subscription",
+    mode: "flatten",
 };
 
 const NAMESPACE = "claudeAgentSdk";
 
 function isAuthMode(value: unknown): value is AuthMode {
     return value === "subscription" || value === "apiKey";
+}
+
+function isHistoryMode(value: unknown): value is HistoryMode {
+    return value === "flatten" || value === "session";
 }
 
 function isSettingSource(value: unknown): value is SettingSource {
@@ -78,6 +99,10 @@ export function parseAgentSdkSettings(
 
     if (isAuthMode(block["authMode"])) {
         out.authMode = block["authMode"];
+    }
+
+    if (isHistoryMode(block["mode"])) {
+        out.mode = block["mode"];
     }
 
     const sources = block["settingSources"];
