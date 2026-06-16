@@ -1,3 +1,9 @@
+## [2.0.1](https://github.com/Mearman/tau/compare/v2.0.0...v2.0.1) (2026-06-16)
+
+### Bug Fixes
+
+* **agent-sdk:** accept apiKeySource 'none' as subscription auth ([79e7c9b](https://github.com/Mearman/tau/commit/79e7c9b398d4b767a602482cc9bd077b4e092583))
+
 ## [2.0.0](https://github.com/Mearman/tau/compare/v1.8.0...v2.0.0) (2026-06-16)
 
 ### ⚠ BREAKING CHANGES
