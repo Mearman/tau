@@ -1,3 +1,13 @@
+## [2.0.4](https://github.com/Mearman/tau/compare/v2.0.3...v2.0.4) (2026-06-16)
+
+### Bug Fixes
+
+* **agent-sdk:** flatten history into one user message ([5b208af](https://github.com/Mearman/tau/commit/5b208afa3083b5aca9ee01dbfe43182778736bf3))
+
+### Refactoring
+
+* **agent-sdk:** type-guard settings parsing and test merge precedence ([0a5415a](https://github.com/Mearman/tau/commit/0a5415ac8ef31ad3376a6b62e5963540c500ce3d))
+
 ## [2.0.3](https://github.com/Mearman/tau/compare/v2.0.2...v2.0.3) (2026-06-16)
 
 ### Tests
