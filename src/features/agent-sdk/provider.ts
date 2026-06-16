@@ -89,6 +89,7 @@ import {
     resolveSdkTools,
     type ResolvedSdkTools,
 } from "./tools.ts";
+import { createHash } from "node:crypto";
 import { resolveClaudeCodeExecutable } from "./executable.ts";
 import { loadAgentSdk } from "./sdk-loader.ts";
 import { assertSubscriptionAuth, buildSdkEnv } from "./auth.ts";
@@ -100,6 +101,25 @@ export { PROVIDER_API, PROVIDER_DISPLAY_NAME, PROVIDER_ID };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Cheap fingerprint of the first message, used to detect that pi's transcript
+ * prefix still matches what the SDK session holds. Compaction rewrites the
+ * front of the transcript (replacing early turns with a summary), which changes
+ * the head even when the message count stays the same — so a mismatch means the
+ * SDK session is stale and must be re-seeded rather than resumed.
+ */
+export function headFingerprint(messages: readonly Message[]): string {
+    const head = messages[0];
+    if (head === undefined) return "";
+    const sample =
+        typeof head.content === "string"
+            ? head.content
+            : head.content
+                  .map((b) => (b.type === "text" ? b.text : `[${b.type}]`))
+                  .join("");
+    return createHash("sha1").update(`${head.role}:${sample}`).digest("hex");
 }
 
 // ── SDK message type guards (narrow the SDKMessage union safely) ───────
@@ -293,8 +313,7 @@ function safeStringify(value: unknown): string {
  */
 export function buildIncrementalPrompt(
     messages: Message[],
-    sentCount: number,
-    _customToolNameToSdk: ReadonlyMap<string, string>
+    sentCount: number
 ): AsyncIterable<SDKUserMessage> {
     async function* generate(): AsyncGenerator<SDKUserMessage> {
         const blocks: ContentBlockParam[] = [];
@@ -799,7 +818,7 @@ interface StreamDeps {
      */
     sdkSessions: Map<
         string,
-        { sdkSessionId: string | undefined; sentCount: number }
+        { sdkSessionId: string | undefined; sentCount: number; head: string }
     >;
 }
 
@@ -868,27 +887,32 @@ async function runAgentSdkQuery(
 
         // Session mode: resume the SDK session and send only new user/tool-
         // result messages. Flatten mode: send the whole transcript. pi's
-        // session id keys the SDK session; a missing/stale cursor (first turn
-        // or a compact that shrank the transcript) seeds a fresh session.
+        // session id keys the SDK session; a missing/stale cursor (first turn,
+        // a compact that shrank the transcript, or a compact that rewrote the
+        // prefix while keeping the length — detected via the head fingerprint)
+        // seeds a fresh session.
         const piSessionId = options?.sessionId;
         const sessionMode =
             deps.settings.mode === "session" && piSessionId !== undefined;
         let resumeId: string | undefined;
         let cursorSentCount = 0;
         let prompt: AsyncIterable<SDKUserMessage>;
+        // Head fingerprint of the current transcript; reused for the stale-
+        // resume guard and stored on the cursor for next turn.
+        const head = headFingerprint(context.messages);
         if (sessionMode) {
             const cursor = deps.sdkSessions.get(piSessionId);
             if (
                 cursor !== undefined &&
                 cursor.sdkSessionId !== undefined &&
-                cursor.sentCount <= context.messages.length
+                cursor.sentCount <= context.messages.length &&
+                cursor.head === head
             ) {
                 resumeId = cursor.sdkSessionId;
                 cursorSentCount = context.messages.length;
                 prompt = buildIncrementalPrompt(
                     context.messages,
-                    cursor.sentCount,
-                    resolved.customToolNameToSdk
+                    cursor.sentCount
                 );
             } else {
                 deps.sdkSessions.delete(piSessionId);
@@ -1000,6 +1024,7 @@ async function runAgentSdkQuery(
             deps.sdkSessions.set(piSessionId, {
                 sdkSessionId: capturedSdkSessionId,
                 sentCount: cursorSentCount,
+                head,
             });
         }
 

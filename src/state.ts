@@ -154,6 +154,6 @@ export class TauState {
     // a proper alternating transcript. Keyed by pi's session id.
     agentSdkSessions = new Map<
         string,
-        { sdkSessionId: string | undefined; sentCount: number }
+        { sdkSessionId: string | undefined; sentCount: number; head: string }
     >();
 }

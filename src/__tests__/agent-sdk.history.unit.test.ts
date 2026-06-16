@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import {
     buildHistoryIterable,
     buildIncrementalPrompt,
+    headFingerprint,
 } from "../features/agent-sdk/provider.ts";
 import type {
     AssistantMessage,
@@ -75,13 +76,17 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
     };
 }
 
-function toolResult(id: string, text: string): ToolResultMessage {
+function toolResult(
+    id: string,
+    text: string,
+    isError = false
+): ToolResultMessage {
     return {
         role: "toolResult",
         toolCallId: id,
         toolName: "read",
         content: [{ type: "text", text }],
-        isError: false,
+        isError,
         timestamp: 0,
     };
 }
@@ -164,11 +169,7 @@ async function incremental(
     messages: Message[],
     sentCount: number
 ): Promise<Block[]> {
-    for await (const msg of buildIncrementalPrompt(
-        messages,
-        sentCount,
-        new Map()
-    )) {
+    for await (const msg of buildIncrementalPrompt(messages, sentCount)) {
         return msg.message.content as Block[];
     }
     throw new Error("no message yielded");
@@ -195,10 +196,27 @@ void describe("buildIncrementalPrompt (session mode)", () => {
         // Tool result is a real tool_result block keyed by the SDK's tool_use id.
         const result = blocks.find((b) => b.type === "tool_result");
         assert.equal(result?.tool_use_id, "toolu_1");
+        assert.equal(result?.is_error, false);
         // The new user message is present.
         assert.ok(
             blocks.some((b) => b.type === "text" && b.text === "next question")
         );
+    });
+
+    void it("propagates tool-result errors as is_error", async () => {
+        const blocks = await incremental(
+            [
+                user("hello"),
+                assistant([{ type: "text", text: "hi" }]),
+                toolResult("toolu_2", "boom", true),
+                user("retry"),
+            ],
+            1
+        );
+        const result = blocks.find(
+            (b) => b.type === "tool_result" && b.tool_use_id === "toolu_2"
+        );
+        assert.equal(result?.is_error, true);
     });
 
     void it("yields an empty user message when there is nothing new", async () => {
@@ -208,5 +226,29 @@ void describe("buildIncrementalPrompt (session mode)", () => {
             ["text"]
         );
         assert.equal(blocks[0]?.text, "");
+    });
+});
+
+void describe("headFingerprint (compaction detection)", () => {
+    void it("is stable while the transcript head is unchanged", () => {
+        // Same first message, different later content -> same fingerprint.
+        const a = [user("hello"), assistant([{ type: "text", text: "hi" }])];
+        const b = [
+            user("hello"),
+            assistant([{ type: "text", text: "different later turn" }]),
+        ];
+        assert.equal(headFingerprint(a), headFingerprint(b));
+    });
+
+    void it("changes when the head message is rewritten (e.g. a compaction summary)", () => {
+        const before = [user("the original first turn")];
+        const after = [
+            user("[compaction summary] earlier turns were summarised"),
+        ];
+        assert.notEqual(headFingerprint(before), headFingerprint(after));
+    });
+
+    void it("is empty for an empty transcript", () => {
+        assert.equal(headFingerprint([]), "");
     });
 });
