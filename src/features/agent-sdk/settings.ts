@@ -59,6 +59,11 @@ function isSettingSource(value: unknown): value is SettingSource {
     return value === "user" || value === "project" || value === "local";
 }
 
+/** Narrow an unknown to a plain string-keyed object, without a cast. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Validate a raw `tau.claudeAgentSdk` object into typed settings.
  * Returns `undefined` if the block is absent or not an object.
@@ -66,10 +71,8 @@ function isSettingSource(value: unknown): value is SettingSource {
 export function parseAgentSdkSettings(
     raw: unknown
 ): AgentSdkSettings | undefined {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        return undefined;
-    }
-    const block = raw as Record<string, unknown>;
+    if (!isRecord(raw)) return undefined;
+    const block = raw;
 
     const out: AgentSdkSettings = { ...DEFAULT_SETTINGS };
 
@@ -110,27 +113,27 @@ export function readAgentSdkSettingsFromFile(
     } catch {
         return undefined;
     }
-    if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        Array.isArray(parsed)
-    ) {
-        return undefined;
-    }
-    const tau = (parsed as Record<string, unknown>)["tau"];
-    if (typeof tau !== "object" || tau === null || Array.isArray(tau)) {
-        return undefined;
-    }
-    return parseAgentSdkSettings((tau as Record<string, unknown>)[NAMESPACE]);
+    if (!isRecord(parsed)) return undefined;
+    const tau = parsed["tau"];
+    if (!isRecord(tau)) return undefined;
+    return parseAgentSdkSettings(tau[NAMESPACE]);
 }
 
 /**
  * Merge global then project settings (project wins). Always returns a complete
  * settings object because `authMode` has a default.
+ *
+ * `paths` overrides the default global/project file locations and exists for
+ * tests; callers omit it to use the real `~/.pi/agent/settings.json` and
+ * `<cwd>/.pi/settings.json`.
  */
-export function loadAgentSdkSettings(cwd: string): AgentSdkSettings {
-    const globalPath = join(homedir(), ".pi", "agent", "settings.json");
-    const projectPath = join(cwd, ".pi", "settings.json");
+export function loadAgentSdkSettings(
+    cwd: string,
+    paths?: { global?: string; project?: string }
+): AgentSdkSettings {
+    const globalPath =
+        paths?.global ?? join(homedir(), ".pi", "agent", "settings.json");
+    const projectPath = paths?.project ?? join(cwd, ".pi", "settings.json");
 
     const global = readAgentSdkSettingsFromFile(globalPath);
     const project = readAgentSdkSettingsFromFile(projectPath);

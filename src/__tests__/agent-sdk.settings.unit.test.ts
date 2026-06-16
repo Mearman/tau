@@ -108,4 +108,39 @@ void describe("loadAgentSdkSettings", () => {
             rmSync(dir, { recursive: true, force: true });
         }
     });
+
+    void it("project settings override global", () => {
+        const globalDir = mkdtempSync(join(tmpdir(), "tau-sdk-cfg-g-"));
+        const projectDir = mkdtempSync(join(tmpdir(), "tau-sdk-cfg-p-"));
+        try {
+            writeFileSync(
+                join(globalDir, "settings.json"),
+                JSON.stringify({
+                    tau: { claudeAgentSdk: { authMode: "apiKey" } },
+                })
+            );
+            writeFileSync(
+                join(projectDir, "settings.json"),
+                JSON.stringify({
+                    tau: {
+                        claudeAgentSdk: {
+                            authMode: "subscription",
+                            strictMcpConfig: true,
+                        },
+                    },
+                })
+            );
+            const settings = loadAgentSdkSettings(projectDir, {
+                global: join(globalDir, "settings.json"),
+                project: join(projectDir, "settings.json"),
+            });
+            // Project wins over global for authMode...
+            assert.equal(settings.authMode, "subscription");
+            // ...and project-only fields are present.
+            assert.equal(settings.strictMcpConfig, true);
+        } finally {
+            rmSync(globalDir, { recursive: true, force: true });
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
 });
