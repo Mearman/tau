@@ -112,12 +112,20 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
 
-    // ── Integrations (6) ──────────────────────────────────────────
+    // ── Integrations (7) ──────────────────────────────────────────
     {
         id: "agent-sdk",
         label: "Claude Agent SDK provider",
         description:
             "Route Claude model calls through the Agent SDK to draw from the Claude Pro/Max subscription rate-limit pool",
+        group: "Integrations",
+        defaultOn: true,
+    },
+    {
+        id: "claude-resume",
+        label: "Claude session loader (/claude-resume)",
+        description:
+            "Load a Claude Code (~/.claude) session into a new pi session via /claude-resume",
         group: "Integrations",
         defaultOn: true,
     },

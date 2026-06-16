@@ -29,6 +29,7 @@ const config: UserConfig = {
                 "web-browse",
                 "web-search",
                 "agent-sdk",
+                "claude-resume",
             ],
         ],
     },

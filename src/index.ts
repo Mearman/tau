@@ -71,6 +71,7 @@ import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerWebSearch } from "./features/web-search/index.ts";
 import { registerAgentSdkProvider } from "./features/agent-sdk/index.ts";
+import { registerClaudeResumeCommand } from "./features/claude-resume.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -110,6 +111,7 @@ export default function (pi: ExtensionAPI) {
     registerWebBrowse(pi, state);
     registerWebSearch(pi, state);
     registerAgentSdkProvider(pi, state);
+    registerClaudeResumeCommand(pi, state);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
