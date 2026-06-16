@@ -1,3 +1,45 @@
+## [2.0.0](https://github.com/Mearman/tau/compare/v1.8.0...v2.0.0) (2026-06-16)
+
+### ⚠ BREAKING CHANGES
+
+* **context-files:** User-saved overrides keyed on 'claude-rules' are
+silently dropped on upgrade. Re-save with the new id:
+/tau set instructions off
+
+### Features
+
+* **agent-sdk:** add Claude Agent SDK provider ([eb98857](https://github.com/Mearman/tau/commit/eb988570eb6fb8eca8fcfd0d605ecf91489835ff))
+* **context-files:** add dedupeByCanonicalName helper for rules merge ([d1b60c8](https://github.com/Mearman/tau/commit/d1b60c856b2c17df4da66b566d56a0022c22ddda))
+* **context-files:** add global rules scan and applies-to frontmatter ([23610b0](https://github.com/Mearman/tau/commit/23610b0814c7054d74e5e1b8595cc9414baef455))
+* **context-files:** add memory feature for MEMORY.md auto-load ([7308b68](https://github.com/Mearman/tau/commit/7308b688ecb246cabafdef7e5cca1314f6d3780f))
+* **context-files:** rename claude-rules feature to instructions ([18838b4](https://github.com/Mearman/tau/commit/18838b44cf71cd7c5210a8bac9ef2fe46fcb623e))
+* **permissions:** add dontAsk mode, fix defaultMode mapping ([b27b03b](https://github.com/Mearman/tau/commit/b27b03be8ecf669ac06409c2b5a14042ffca3ca7))
+* remove GitHub autocomplete feature ([9b6250e](https://github.com/Mearman/tau/commit/9b6250e9c125bbc6fc588caf632b6ac10ba656a9))
+
+### Bug Fixes
+
+* **bash-tmux:** reuse tmux session across foreground commands ([0435da2](https://github.com/Mearman/tau/commit/0435da20cec9c96068aace8f6b672d434bc823b3))
+* **context-files:** resolve symlinks to deduplicate via realpath ([b48dd25](https://github.com/Mearman/tau/commit/b48dd255ffb0517280add0663cd922a6cd5a5063))
+* **deps:** declare marked and @anthropic-ai/sdk as direct dependencies ([93fb11f](https://github.com/Mearman/tau/commit/93fb11f2bfa327b8d3812e66288e4fd33a3e7922))
+* **deps:** override ws and protobufjs to clear high-severity advisories ([b5d5561](https://github.com/Mearman/tau/commit/b5d55616ecc8b11789f18948c1b02991324ac2c9))
+* **permissions:** revert defaultMode fallback to allow ([8aee6b2](https://github.com/Mearman/tau/commit/8aee6b2714a117f74858301cf2eeb0ce0830251b))
+
+### Refactoring
+
+* **context-files:** rewrite [@include](https://github.com/include) extractor to use marked lexer token walk ([0b3d253](https://github.com/Mearman/tau/commit/0b3d25302ef081439f398e42a6ded94d2ff1353a))
+* rename claude-rules to context-files ([c3e2ef7](https://github.com/Mearman/tau/commit/c3e2ef7fc2c226990204f2136bd4173b1db35500))
+* wire context-files feature into extension entry point ([e69c7ca](https://github.com/Mearman/tau/commit/e69c7ca1e66f212d4d4dd923e1925accee876f89))
+
+### Tests
+
+* **context-files:** add link-based include syntax and symlink dedup tests ([eae2cc8](https://github.com/Mearman/tau/commit/eae2cc8c1252a26e0fb2658544f8429918eee211))
+* **context-files:** cover local files, first-match-wins, independent loading, recursive rules ([93ed541](https://github.com/Mearman/tau/commit/93ed541616feaff06aa4d90b717a527011341c36))
+* replace claude-rules tests with context-files tests ([dc4f41c](https://github.com/Mearman/tau/commit/dc4f41ceb3c6ab90f2b47cdcf76a8b356821e64e))
+
+### Chores
+
+* **deps:** add context-files to commitlint scope enum ([86fe322](https://github.com/Mearman/tau/commit/86fe32231853fcd78f1040e105019285308f4ca9))
+
 ## [1.8.0](https://github.com/Mearman/tau/compare/v1.7.0...v1.8.0) (2026-06-06)
 
 ### Features
