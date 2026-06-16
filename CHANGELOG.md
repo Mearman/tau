@@ -1,3 +1,9 @@
+## [2.0.3](https://github.com/Mearman/tau/compare/v2.0.2...v2.0.3) (2026-06-16)
+
+### Tests
+
+* reframe waitForChildProcess regression around the drain invariant ([1ca4b8c](https://github.com/Mearman/tau/commit/1ca4b8cf7d24961567aca233c96f4bd82e63e45f))
+
 ## [2.0.2](https://github.com/Mearman/tau/compare/v2.0.1...v2.0.2) (2026-06-16)
 
 ### Refactoring
