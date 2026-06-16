@@ -1,0 +1,14 @@
+# pnpm overrides. pnpm 10 no longer reads the `pnpm.overrides` field from
+# package.json (it prints a deprecation warning and ignores it); overrides now
+# live here as a top-level key. See https://pnpm.io/settings.
+#
+# ws and protobufjs are forced to patched versions to clear two high-severity
+# advisories (GHSA-96hv-2xvq-fx4p ws DoS; GHSA-wcpc-wj8m-hjx6 protobufjs DoS)
+# that arrive transitively via pi-ai's @google/genai. The proper upstream fix
+# is in pi-ai/@google/genai; this override is the lever this repo has.
+#
+# yargs is deduped to ^18 (carried over from the former package.json override).
+overrides:
+  ws: ^8.21.0
+  protobufjs: ^7.6.1
+  yargs: ^18.0.0
