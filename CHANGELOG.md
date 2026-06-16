@@ -1,3 +1,14 @@
+## [2.0.2](https://github.com/Mearman/tau/compare/v2.0.1...v2.0.2) (2026-06-16)
+
+### Refactoring
+
+* remove unused git-checkpoint module ([14cf11a](https://github.com/Mearman/tau/commit/14cf11aed26b9cd8c9c9d618bd417cec6116f083))
+* **web-search:** apply formatting and resolve lint warnings ([80ba401](https://github.com/Mearman/tau/commit/80ba4019b0e1379cc68595a2ffd97d30d458fb0f))
+
+### Styles
+
+* **context-files:** apply prettier formatting ([113ab50](https://github.com/Mearman/tau/commit/113ab502cdd549b0064e30edaa5b6d5a3c6efcd9))
+
 ## [2.0.1](https://github.com/Mearman/tau/compare/v2.0.0...v2.0.1) (2026-06-16)
 
 ### Bug Fixes
