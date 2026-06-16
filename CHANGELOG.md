@@ -1,3 +1,9 @@
+## [2.2.0](https://github.com/Mearman/tau/compare/v2.1.1...v2.2.0) (2026-06-16)
+
+### Features
+
+* **claude-resume:** load Claude Code sessions into pi ([80d6516](https://github.com/Mearman/tau/commit/80d6516b9ea126d1811c8eb0e16f53f835bb8f98))
+
 ## [2.1.1](https://github.com/Mearman/tau/compare/v2.1.0...v2.1.1) (2026-06-16)
 
 ### Bug Fixes
