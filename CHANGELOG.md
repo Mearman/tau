@@ -1,3 +1,9 @@
+## [2.1.1](https://github.com/Mearman/tau/compare/v2.1.0...v2.1.1) (2026-06-16)
+
+### Bug Fixes
+
+* **agent-sdk:** detect compact-driven stale session resume ([493b17e](https://github.com/Mearman/tau/commit/493b17e25cfd8f8f445ade6e9bea12e824131338))
+
 ## [2.1.0](https://github.com/Mearman/tau/compare/v2.0.4...v2.1.0) (2026-06-16)
 
 ### Features
