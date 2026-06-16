@@ -17,10 +17,23 @@ void describe("ClaudeSearchProvider.search", () => {
     let fetchedBody: unknown;
 
     function mockFetch(responseBody: unknown, status = 200) {
-        globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-            fetchedUrl = input instanceof URL ? input.toString() : String(input);
-            fetchedHeaders = init?.headers as Record<string, string> | undefined;
-            fetchedBody = init?.body ? JSON.parse(String(init.body)) : undefined;
+        globalThis.fetch = async (
+            input: RequestInfo | URL,
+            init?: RequestInit
+        ) => {
+            fetchedUrl =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.toString()
+                      : input.url;
+            fetchedHeaders = init?.headers as
+                | Record<string, string>
+                | undefined;
+            fetchedBody =
+                typeof init?.body === "string"
+                    ? JSON.parse(init.body)
+                    : undefined;
             return new Response(JSON.stringify(responseBody), {
                 status,
                 headers: { "content-type": "application/json" },

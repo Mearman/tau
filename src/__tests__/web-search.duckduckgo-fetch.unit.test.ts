@@ -15,8 +15,16 @@ void describe("DuckDuckGoSearchProvider.search", () => {
 
     function mockFetch(html: string) {
         globalThis.fetch = async (input: RequestInfo | URL) => {
-            fetchedUrl = input instanceof URL ? input.toString() : String(input);
-            return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+            fetchedUrl =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.toString()
+                      : input.url;
+            return new Response(html, {
+                status: 200,
+                headers: { "content-type": "text/html" },
+            });
         };
     }
 
@@ -34,8 +42,14 @@ void describe("DuckDuckGoSearchProvider.search", () => {
         await provider.search("test query", 5);
 
         assert.ok(fetchedUrl);
-        assert.ok(fetchedUrl.includes("html.duckduckgo.com"), `URL was: ${fetchedUrl}`);
-        assert.ok(fetchedUrl.includes("q=test%20query"), `URL was: ${fetchedUrl}`);
+        assert.ok(
+            fetchedUrl.includes("html.duckduckgo.com"),
+            `URL was: ${fetchedUrl}`
+        );
+        assert.ok(
+            fetchedUrl.includes("q=test%20query"),
+            `URL was: ${fetchedUrl}`
+        );
     });
 
     void it("returns parsed results from the fetched HTML", async () => {
@@ -60,14 +74,18 @@ void describe("DuckDuckGoSearchProvider.search", () => {
     });
 
     void it("throws on non-200 response", async () => {
-        globalThis.fetch = async () => new Response("Forbidden", { status: 403 });
+        globalThis.fetch = async () =>
+            new Response("Forbidden", { status: 403 });
         const provider = new DuckDuckGoSearchProvider();
 
         await assert.rejects(
             () => provider.search("test", 5),
             (err: unknown) => {
                 assert.ok(err instanceof Error);
-                assert.ok(err.message.includes("403"), `Message was: ${err.message}`);
+                assert.ok(
+                    err.message.includes("403"),
+                    `Message was: ${err.message}`
+                );
                 return true;
             }
         );

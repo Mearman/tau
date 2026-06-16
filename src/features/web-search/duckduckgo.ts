@@ -45,17 +45,14 @@ export function parseDuckDuckGoHtml(
         // Look for the snippet after the title link, up to the next result
         const afterTitle = html.slice(titleMatch.index + titleMatch[0].length);
         const nextResult = afterTitle.indexOf("result__a");
-        const snippetRegion = nextResult >= 0
-            ? afterTitle.slice(0, nextResult)
-            : afterTitle;
+        const snippetRegion =
+            nextResult >= 0 ? afterTitle.slice(0, nextResult) : afterTitle;
 
         const snippetMatch =
             /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/.exec(
                 snippetRegion
             );
-        const snippet = snippetMatch
-            ? stripTags(snippetMatch[1]).trim()
-            : "";
+        const snippet = snippetMatch ? stripTags(snippetMatch[1]).trim() : "";
 
         results.push({ title, url, snippet });
     }

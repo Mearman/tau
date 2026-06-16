@@ -98,8 +98,8 @@ void describe("registerWebSearch", () => {
             "test-call",
             { query: "test query" },
             undefined as never,
-            undefined as never,
-            undefined as never
+            undefined,
+            undefined
         );
 
         const parsed = result as {
@@ -123,8 +123,8 @@ void describe("registerWebSearch", () => {
             "test-call",
             { query: "test" },
             undefined as never,
-            undefined as never,
-            undefined as never
+            undefined,
+            undefined
         );
 
         const parsed = result as {

@@ -32,7 +32,7 @@ export class ClaudeSearchProvider implements SearchProvider {
         if (!apiKey) {
             throw new Error(
                 "Claude search requires either the Claude Agent SDK " +
-                "or ANTHROPIC_API_KEY to be set"
+                    "or ANTHROPIC_API_KEY to be set"
             );
         }
 
@@ -65,12 +65,10 @@ export class ClaudeSearchProvider implements SearchProvider {
         });
 
         if (!response.ok) {
-            throw new Error(
-                `Claude search failed: HTTP ${response.status}`
-            );
+            throw new Error(`Claude search failed: HTTP ${response.status}`);
         }
 
-        const data = await response.json() as {
+        const data = (await response.json()) as {
             content: Array<
                 | { type: "web_search_tool_result"; content: unknown }
                 | { type: "text"; text: string }

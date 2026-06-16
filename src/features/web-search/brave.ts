@@ -9,9 +9,6 @@
 
 import type { SearchProvider, SearchResult } from "./types.ts";
 
-/** Default maximum number of results. */
-const DEFAULT_MAX_RESULTS = 10;
-
 export class BraveSearchProvider implements SearchProvider {
     readonly name = "brave";
 
@@ -27,18 +24,16 @@ export class BraveSearchProvider implements SearchProvider {
 
         const response = await fetch(url, {
             headers: {
-                "Accept": "application/json",
+                Accept: "application/json",
                 "X-Subscription-Token": apiKey,
             },
         });
 
         if (!response.ok) {
-            throw new Error(
-                `Brave search failed: HTTP ${response.status}`
-            );
+            throw new Error(`Brave search failed: HTTP ${response.status}`);
         }
 
-        const data = await response.json() as {
+        const data = (await response.json()) as {
             web?: {
                 results?: Array<{
                     title?: string;
@@ -52,8 +47,9 @@ export class BraveSearchProvider implements SearchProvider {
         if (!webResults) return [];
 
         return webResults
-            .filter((r): r is typeof r & { title: string; url: string } =>
-                typeof r.title === "string" && typeof r.url === "string"
+            .filter(
+                (r): r is typeof r & { title: string; url: string } =>
+                    typeof r.title === "string" && typeof r.url === "string"
             )
             .map((r) => ({
                 title: r.title,

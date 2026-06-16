@@ -16,9 +16,19 @@ void describe("BraveSearchProvider.search", () => {
     let fetchedHeaders: Record<string, string> | undefined;
 
     function mockFetch(responseBody: unknown, status = 200) {
-        globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-            fetchedUrl = input instanceof URL ? input.toString() : String(input);
-            fetchedHeaders = init?.headers as Record<string, string> | undefined;
+        globalThis.fetch = async (
+            input: RequestInfo | URL,
+            init?: RequestInit
+        ) => {
+            fetchedUrl =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.toString()
+                      : input.url;
+            fetchedHeaders = init?.headers as
+                | Record<string, string>
+                | undefined;
             return new Response(JSON.stringify(responseBody), {
                 status,
                 headers: { "content-type": "application/json" },
@@ -55,11 +65,11 @@ void describe("BraveSearchProvider.search", () => {
             fetchedUrl.includes("q=test%20query"),
             `URL was: ${fetchedUrl}`
         );
-        assert.ok(
-            fetchedUrl.includes("count=5"),
-            `URL was: ${fetchedUrl}`
+        assert.ok(fetchedUrl.includes("count=5"), `URL was: ${fetchedUrl}`);
+        assert.equal(
+            fetchedHeaders?.["X-Subscription-Token"],
+            "test-brave-key"
         );
-        assert.equal(fetchedHeaders?.["X-Subscription-Token"], "test-brave-key");
     });
 
     void it("parses web results from the Brave API response", async () => {

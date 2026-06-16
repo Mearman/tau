@@ -29,7 +29,10 @@ void describe("parseDuckDuckGoHtml", () => {
         assert.equal(results.length, 1);
         assert.equal(results[0].title, "Example Documentation");
         assert.equal(results[0].url, "https://example.com/docs");
-        assert.equal(results[0].snippet, "This is the snippet text for the first result.");
+        assert.equal(
+            results[0].snippet,
+            "This is the snippet text for the first result."
+        );
     });
 
     void it("extracts multiple results and respects maxResults", () => {
