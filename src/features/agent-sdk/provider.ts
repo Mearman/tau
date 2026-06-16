@@ -27,7 +27,6 @@ import type {
     AssistantMessageEventStream,
     Context,
     ImageContent,
-    Message,
     Model,
     SimpleStreamOptions,
     TextContent,
@@ -55,7 +54,6 @@ import type {
     Base64ImageSource,
     ContentBlockParam,
     ImageBlockParam,
-    MessageParam,
     TextBlockParam,
 } from "@anthropic-ai/sdk/resources";
 // The raw Anthropic SSE event carried by SDK stream_event messages.
@@ -75,7 +73,6 @@ import {
     TOOL_EXECUTION_DENIED_MESSAGE,
 } from "./constants.ts";
 import {
-    mapPiArgsToSdk,
     mapPiToolNameToSdk,
     mapSdkArgsToPi,
     mapSdkToolNameToPi,
@@ -168,148 +165,112 @@ function toImageBlockParam(image: ImageContent): ImageBlockParam {
 }
 
 /**
- * Map a pi assistant message's content into Anthropic input blocks, preserving
- * thinking signatures (spec improvement #8). Redacted thinking becomes a
- * `redacted_thinking` block carrying its encrypted data; plain thinking without
- * a signature is dropped, since Anthropic requires a signature to continue a
- * reasoning chain and we will not fabricate one.
- */
-function toAssistantContentBlocks(
-    content: AssistantMessage["content"],
-    customToolNameToSdk: ReadonlyMap<string, string>
-): ContentBlockParam[] {
-    const blocks: ContentBlockParam[] = [];
-    for (const block of content) {
-        if (block.type === "text") {
-            blocks.push({ type: "text", text: block.text });
-        } else if (block.type === "thinking") {
-            if (block.redacted) {
-                if (block.thinkingSignature) {
-                    blocks.push({
-                        type: "redacted_thinking",
-                        data: block.thinkingSignature,
-                    });
-                }
-                continue;
-            }
-            if (block.thinkingSignature) {
-                blocks.push({
-                    type: "thinking",
-                    thinking: block.thinking,
-                    signature: block.thinkingSignature,
-                });
-            }
-            // No signature -> cannot replay; drop rather than fabricate.
-        } else if (block.type === "toolCall") {
-            blocks.push({
-                type: "tool_use",
-                id: block.id,
-                name: mapPiToolNameToSdk(block.name, customToolNameToSdk),
-                input: mapPiArgsToSdk(block.name, block.arguments),
-            });
-        }
-    }
-    return blocks;
-}
-
-/** A single alternating turn in the replayed transcript. */
-interface ReplayFrame {
-    role: "user" | "assistant";
-    blocks: ContentBlockParam[];
-}
-
-/**
- * Fold pi's message list into strictly role-alternating frames.
+ * Build the SDK prompt as a single user message.
  *
- * Consecutive same-role messages are merged (pi user steers, and multiple tool
- * results all land in one user turn as separate `tool_result` blocks). Empty
- * assistant turns are dropped (Anthropic rejects them). Tool-result messages
- * become user-role `tool_result` blocks.
- */
-function buildReplayFrames(
-    messages: Message[],
-    customToolNameToSdk: ReadonlyMap<string, string>
-): ReplayFrame[] {
-    const frames: ReplayFrame[] = [];
-
-    for (const msg of messages) {
-        let role: "user" | "assistant";
-        let blocks: ContentBlockParam[];
-        if (msg.role === "user") {
-            role = "user";
-            blocks = toUserContentBlocks(msg.content);
-        } else if (msg.role === "assistant") {
-            role = "assistant";
-            blocks = toAssistantContentBlocks(msg.content, customToolNameToSdk);
-            if (blocks.length === 0) continue;
-        } else {
-            // toolResult
-            role = "user";
-            blocks = [
-                {
-                    type: "tool_result",
-                    tool_use_id: msg.toolCallId,
-                    content: toUserContentBlocks(msg.content),
-                    is_error: msg.isError,
-                },
-            ];
-        }
-
-        const last = frames[frames.length - 1];
-        if (last !== undefined && last.role === role) {
-            last.blocks.push(...blocks);
-        } else {
-            frames.push({ role, blocks });
-        }
-    }
-
-    return frames;
-}
-
-/**
- * Build the SDK prompt iterable from pi's context.
+ * The Agent SDK's prompt iterable only accepts `role: "user"` messages — it
+ * rejects assistant-role replay outright ("Expected message role 'user', got
+ * 'assistant'"), so pi's conversation is flattened into one user message. Each
+ * prior turn is prefixed with a role label and appended as text; assistant
+ * thinking is omitted (it cannot be replayed as a structured block once
+ * flattened) and historical tool calls are rendered as non-executable text for
+ * context. Images are preserved as image blocks so vision still works.
  *
- * Every frame is yielded as an `SDKUserMessage` whose `message` carries the
- * real role and content; all but the final frame set `shouldQuery: false`
- * (append to the transcript without triggering a turn), and the final frame
- * triggers the assistant turn. Because {@link buildReplayFrames} enforces
- * strict role alternation, the replay is valid regardless of how the SDK
- * reconciles consecutive non-querying messages.
+ * A lone user turn (the common first-turn case) is passed through verbatim, so
+ * images and prompt-cache breakpoints stay clean. This flattened shape is the
+ * empirically necessary one — the spec's structured alternating-turn replay is
+ * not supported by the SDK's API.
  */
 export function buildHistoryIterable(
     context: Context,
     customToolNameToSdk: ReadonlyMap<string, string>
 ): AsyncIterable<SDKUserMessage> {
-    const frames = buildReplayFrames(context.messages, customToolNameToSdk);
-
     async function* generate(): AsyncGenerator<SDKUserMessage> {
-        if (frames.length === 0) {
-            yield {
-                type: "user",
-                message: { role: "user", content: "" },
-                parent_tool_use_id: null,
-                session_id: REPLAY_SESSION_ID,
-            };
-            return;
-        }
-        const lastIndex = frames.length - 1;
-        for (let i = 0; i < frames.length; i++) {
-            const frame = frames[i];
-            const message: MessageParam = {
-                role: frame.role,
-                content: frame.blocks,
-            };
-            yield {
-                type: "user",
-                message,
-                parent_tool_use_id: null,
-                session_id: REPLAY_SESSION_ID,
-                ...(i === lastIndex ? {} : { shouldQuery: false }),
-            };
+        yield buildPromptMessage(context, customToolNameToSdk);
+    }
+    return generate();
+}
+
+/** Common fields for the single replayed user message. */
+const PROMPT_BASE = {
+    type: "user" as const,
+    parent_tool_use_id: null as string | null,
+    session_id: REPLAY_SESSION_ID,
+};
+
+function buildPromptMessage(
+    context: Context,
+    customToolNameToSdk: ReadonlyMap<string, string>
+): SDKUserMessage {
+    const messages = context.messages;
+
+    // Fast path: a lone user turn — pass its content through verbatim.
+    if (messages.length === 1 && messages[0].role === "user") {
+        return {
+            ...PROMPT_BASE,
+            message: {
+                role: "user",
+                content: toUserContentBlocks(messages[0].content),
+            },
+        };
+    }
+
+    const blocks: ContentBlockParam[] = [];
+    const label = (text: string): void => {
+        blocks.push({
+            type: "text",
+            text: `${blocks.length > 0 ? "\n\n" : ""}${text}`,
+        });
+    };
+
+    for (const msg of messages) {
+        if (msg.role === "user") {
+            label("USER:");
+            for (const block of toUserContentBlocks(msg.content)) {
+                blocks.push(block);
+            }
+        } else if (msg.role === "assistant") {
+            label("ASSISTANT:");
+            const before = blocks.length;
+            for (const block of msg.content) {
+                if (block.type === "text") {
+                    blocks.push({ type: "text", text: block.text });
+                } else if (block.type === "toolCall") {
+                    blocks.push({
+                        type: "text",
+                        text: `Historical tool call (non-executable): ${mapPiToolNameToSdk(block.name, customToolNameToSdk)} args=${safeStringify(block.arguments)}`,
+                    });
+                }
+                // thinking is omitted from the flattened transcript.
+            }
+            if (blocks.length === before) {
+                blocks.push({ type: "text", text: "(no visible output)" });
+            }
+        } else {
+            label(
+                `TOOL RESULT (${mapPiToolNameToSdk(msg.toolName, customToolNameToSdk)}, id=${msg.toolCallId}):`
+            );
+            for (const block of toUserContentBlocks(msg.content)) {
+                blocks.push(block);
+            }
         }
     }
 
-    return generate();
+    if (blocks.length === 0) {
+        blocks.push({ type: "text", text: "" });
+    }
+    return {
+        ...PROMPT_BASE,
+        message: { role: "user", content: blocks },
+    };
+}
+
+/** JSON.stringify that never throws (tool args may contain cycles). */
+function safeStringify(value: unknown): string {
+    try {
+        return JSON.stringify(value) ?? "{}";
+    } catch {
+        return "{}";
+    }
 }
 
 // ── Thinking configuration ────────────────────────────────────────────
@@ -804,7 +765,11 @@ async function runAgentSdkQuery(
     const scratch = new Map<number, BlockScratch>();
     let started = false;
     let sawToolCall = false;
+    let sawStreamEvent = false;
     let authVerified = deps.settings.authMode !== "subscription";
+    // Capture the SDK subprocess stderr so a crash (e.g. "process exited with
+    // code 1") surfaces its real reason instead of a bare exit code.
+    const subprocessStderr: string[] = [];
 
     const sdk = await loadAgentSdk();
 
@@ -850,6 +815,9 @@ async function runAgentSdkQuery(
             }),
             env: buildSdkEnv(deps.settings.authMode),
             pathToClaudeCodeExecutable: resolveClaudeCodeExecutable(),
+            stderr: (data) => {
+                subprocessStderr.push(data);
+            },
             systemPrompt: {
                 type: "preset",
                 preset: "claude_code",
@@ -886,6 +854,7 @@ async function runAgentSdkQuery(
             }
 
             if (isStreamEventMessage(message)) {
+                sawStreamEvent = true;
                 if (
                     handleStreamEvent(
                         message.event,
@@ -902,7 +871,7 @@ async function runAgentSdkQuery(
                     stopEarly = true;
                 }
             } else if (isResultMessage(message)) {
-                handleResultMessage(message, output, started);
+                handleResultMessage(message, output, sawStreamEvent);
             }
 
             if (stopEarly) break;
@@ -926,8 +895,15 @@ async function runAgentSdkQuery(
     } catch (error) {
         const reason = options?.signal?.aborted ? "aborted" : "error";
         output.stopReason = reason;
-        output.errorMessage =
+        const baseMessage =
             error instanceof Error ? error.message : String(error);
+        const stderrText = subprocessStderr.join("").trim();
+        // Append the subprocess stderr when present: a non-zero exit carries no
+        // detail on its own, so the captured stderr is the only way to see why
+        // Claude Code crashed (e.g. an unsupported replay shape).
+        output.errorMessage = stderrText
+            ? `${baseMessage}\n${stderrText}`
+            : baseMessage;
         stream.push({
             type: "error",
             reason,

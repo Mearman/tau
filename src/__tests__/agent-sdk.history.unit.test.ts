@@ -1,9 +1,11 @@
 /**
- * Unit tests for the agent-sdk structured-history replay builder.
+ * Tests for the agent-sdk prompt builder.
  *
- * These verify the spec's core improvement: pi's conversation is replayed as
- * real alternating-turn SDKUserMessages with shouldQuery control, preserving
- * thinking signatures and folding tool results into valid user turns.
+ * The Agent SDK only accepts role:"user" messages in its prompt iterable, so
+ * pi's conversation is flattened into a single user message. These tests pin
+ * that shape: a lone user turn passes through verbatim (images preserved);
+ * multi-turn history is flattened with role labels; historical tool calls and
+ * results are rendered as non-executable text for context.
  */
 
 import { describe, it } from "node:test";
@@ -16,20 +18,21 @@ import type {
     UserMessage,
 } from "@earendil-works/pi-ai";
 
-type Yielded = {
-    message: { role: string; content: unknown };
-    shouldQuery?: boolean;
-};
+type Block = { type: string; text?: string; source?: unknown };
 
-async function collect(context: Context): Promise<Yielded[]> {
-    const out: Yielded[] = [];
+async function content(context: Context): Promise<Block[]> {
     for await (const msg of buildHistoryIterable(context, new Map())) {
-        out.push({
-            message: msg.message,
-            shouldQuery: msg.shouldQuery,
-        });
+        return msg.message.content as Block[];
     }
-    return out;
+    throw new Error("no message yielded");
+}
+
+/** Concatenate every text block so labelled content can be asserted as one string. */
+function joined(blocks: Block[]): string {
+    return blocks
+        .filter((b) => b.type === "text")
+        .map((b) => b.text ?? "")
+        .join("\n");
 }
 
 function user(text: string): UserMessage {
@@ -73,166 +76,76 @@ function toolResult(id: string, text: string): ToolResultMessage {
     };
 }
 
-void describe("buildHistoryIterable", () => {
-    void it("yields a single empty trigger when there is no history", async () => {
-        const out = await collect({ messages: [] });
-        assert.equal(out.length, 1);
-        assert.equal(out[0].message.role, "user");
-        assert.equal(out[0].shouldQuery, undefined);
+void describe("buildHistoryIterable (flattened single user message)", () => {
+    void it("passes a lone user turn through verbatim, unlabelled", async () => {
+        const blocks = await content({ messages: [user("hello")] });
+        // Fast path: content is just the user's text, no "USER:" label.
+        assert.deepEqual(
+            blocks.map((b) => b.type),
+            ["text"]
+        );
+        assert.equal(blocks[0]?.text, "hello");
     });
 
-    void it("marks all but the final frame shouldQuery:false", async () => {
-        const out = await collect({
+    void it("yields a single empty user message when there is no history", async () => {
+        const blocks = await content({ messages: [] });
+        assert.deepEqual(
+            blocks.map((b) => b.type),
+            ["text"]
+        );
+        assert.equal(blocks[0]?.text, "");
+    });
+
+    void it("flattens alternating turns into one user message with labels", async () => {
+        const blocks = await content({
             messages: [
                 user("hello"),
-                assistant([{ type: "text", text: "hi" }]),
+                assistant([{ type: "text", text: "hi there" }]),
                 user("again"),
             ],
         });
-        assert.equal(out.length, 3);
-        assert.deepEqual(
-            out.map((m) => m.message.role),
-            ["user", "assistant", "user"]
-        );
-        assert.equal(out[0].shouldQuery, false);
-        assert.equal(out[1].shouldQuery, false);
-        assert.equal(out[2].shouldQuery, undefined); // trigger
+        const text = joined(blocks);
+        assert.match(text, /USER:\nhello/);
+        assert.match(text, /ASSISTANT:\nhi there/);
+        assert.match(text, /USER:\nagain/);
     });
 
-    void it("folds tool results into a user turn and keeps alternation", async () => {
-        const out = await collect({
-            messages: [
-                user("do a thing"),
-                assistant([
-                    { type: "toolCall", id: "t1", name: "read", arguments: {} },
-                ]),
-                toolResult("t1", "file contents"),
-                user("thanks"),
-            ],
-        });
-        // toolResult and the trailing user text merge into one user turn.
-        assert.deepEqual(
-            out.map((m) => m.message.role),
-            ["user", "assistant", "user"]
-        );
-        const toolFrame = out[2].message.content as Array<{
-            type: string;
-            tool_use_id?: string;
-            text?: string;
-        }>;
-        assert.ok(
-            toolFrame.some(
-                (b) => b.type === "tool_result" && b.tool_use_id === "t1"
-            )
-        );
-        assert.ok(
-            toolFrame.some((b) => b.type === "text" && b.text === "thanks")
-        );
-        // The merged user turn is the trigger.
-        assert.equal(out[2].shouldQuery, undefined);
-        assert.equal(out[1].shouldQuery, false);
-    });
-
-    void it("merges consecutive tool results into one user frame", async () => {
-        const out = await collect({
-            messages: [
-                assistant([
-                    { type: "toolCall", id: "a", name: "read", arguments: {} },
-                    { type: "toolCall", id: "b", name: "read", arguments: {} },
-                ]),
-                toolResult("a", "one"),
-                toolResult("b", "two"),
-            ],
-        });
-        assert.deepEqual(
-            out.map((m) => m.message.role),
-            ["assistant", "user"]
-        );
-        const userFrame = out[1].message.content as Array<{
-            type: string;
-            tool_use_id?: string;
-        }>;
-        assert.equal(
-            userFrame.filter((b) => b.type === "tool_result").length,
-            2
-        );
-    });
-
-    void it("preserves thinking signatures on assistant replay", async () => {
-        const out = await collect({
-            messages: [
-                assistant([
-                    {
-                        type: "thinking",
-                        thinking: "reasoning",
-                        thinkingSignature: "SIG",
-                    },
-                    { type: "text", text: "answer" },
-                ]),
-                user("ok"),
-            ],
-        });
-        const asst = out[0].message.content as Array<Record<string, unknown>>;
-        const thinking = asst.find((b) => b["type"] === "thinking");
-        assert.equal(thinking?.["signature"], "SIG");
-        assert.equal(thinking?.["thinking"], "reasoning");
-    });
-
-    void it("drops signatureless thinking rather than fabricating it", async () => {
-        const out = await collect({
-            messages: [
-                assistant([
-                    { type: "thinking", thinking: "no sig" },
-                    { type: "text", text: "answer" },
-                ]),
-                user("ok"),
-            ],
-        });
-        const asst = out[0].message.content as Array<Record<string, unknown>>;
-        assert.equal(
-            asst.find((b) => b["type"] === "thinking"),
-            undefined
-        );
-    });
-
-    void it("maps redacted thinking to a redacted_thinking block", async () => {
-        const out = await collect({
-            messages: [
-                assistant([
-                    {
-                        type: "thinking",
-                        thinking: "[redacted]",
-                        thinkingSignature: "OPAQUE",
-                        redacted: true,
-                    },
-                    { type: "text", text: "answer" },
-                ]),
-                user("ok"),
-            ],
-        });
-        const asst = out[0].message.content as Array<Record<string, unknown>>;
-        const redacted = asst.find((b) => b["type"] === "redacted_thinking");
-        assert.equal(redacted?.["data"], "OPAQUE");
-    });
-
-    void it("maps assistant tool calls to Claude Code names and args", async () => {
-        const out = await collect({
+    void it("renders historical assistant tool calls as non-executable text", async () => {
+        const blocks = await content({
             messages: [
                 assistant([
                     {
                         type: "toolCall",
                         id: "t1",
                         name: "read",
-                        arguments: { path: "/x", limit: 5 },
+                        arguments: { path: "/x" },
                     },
                 ]),
                 user("ok"),
             ],
         });
-        const asst = out[0].message.content as Array<Record<string, unknown>>;
-        const use = asst.find((b) => b["type"] === "tool_use");
-        assert.equal(use?.["name"], "Read");
-        const input = use?.["input"] as Record<string, unknown>;
-        assert.equal(input["file_path"], "/x");
+        const text = joined(blocks);
+        assert.match(text, /Historical tool call \(non-executable\): Read/);
+        assert.match(text, /"path":"\/x"/);
+    });
+
+    void it("labels tool results with their tool name and call id", async () => {
+        const blocks = await content({
+            messages: [
+                assistant([
+                    {
+                        type: "toolCall",
+                        id: "t1",
+                        name: "read",
+                        arguments: {},
+                    },
+                ]),
+                toolResult("t1", "file contents"),
+                user("thanks"),
+            ],
+        });
+        const text = joined(blocks);
+        assert.match(text, /TOOL RESULT \(Read, id=t1\):/);
+        assert.match(text, /file contents/);
     });
 });
