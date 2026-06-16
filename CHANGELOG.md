@@ -1,3 +1,9 @@
+## [2.1.0](https://github.com/Mearman/tau/compare/v2.0.4...v2.1.0) (2026-06-16)
+
+### Features
+
+* **agent-sdk:** add session mode (SDK session resume) as alternative to flatten ([8ad7ed6](https://github.com/Mearman/tau/commit/8ad7ed6b7d87365a15d7fa92a6090d72190774e5)), closes [anthropics/claude-agent-sdk-python#848](https://github.com/anthropics/claude-agent-sdk-python/issues/848)
+
 ## [2.0.4](https://github.com/Mearman/tau/compare/v2.0.3...v2.0.4) (2026-06-16)
 
 ### Bug Fixes
