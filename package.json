@@ -46,6 +46,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.91.1",
     "@commitlint/cli": "20.5.3",
     "@commitlint/config-conventional": "20.5.3",
     "@eslint/js": "10.0.1",
@@ -73,6 +74,7 @@
     "patchright": "1.60.0"
   },
   "dependencies": {
+    "marked": "15.0.12",
     "playwright-core": "1.60.0"
   }
 }
