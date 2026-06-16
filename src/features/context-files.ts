@@ -179,9 +179,7 @@ export function parseFrontmatter(raw: string): {
 
     // Extract paths: field — handle both comma-separated string and YAML list.
     // `applies-to:` is accepted as a synonym for the more conventional `paths:`.
-    const pathsMatch = frontmatterText.match(
-        /^(?:paths|applies-to):\s*(.+)$/m
-    );
+    const pathsMatch = frontmatterText.match(/^(?:paths|applies-to):\s*(.+)$/m);
     if (!pathsMatch) return { content: body };
 
     const rawPaths = pathsMatch[1]?.trim();
