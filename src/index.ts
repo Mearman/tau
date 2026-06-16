@@ -70,6 +70,7 @@ import { registerSummarize } from "./features/summarize.ts";
 import { registerContext } from "./features/context.ts";
 import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerWebSearch } from "./features/web-search/index.ts";
+import { registerAgentSdkProvider } from "./features/agent-sdk/index.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -108,6 +109,7 @@ export default function (pi: ExtensionAPI) {
     registerContext(pi, state);
     registerWebBrowse(pi, state);
     registerWebSearch(pi, state);
+    registerAgentSdkProvider(pi, state);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);

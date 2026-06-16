@@ -112,7 +112,15 @@ export const FEATURE_REGISTRY: ReadonlyArray<FeatureDef> = [
         defaultOn: true,
     },
 
-    // ── Integrations (5) ──────────────────────────────────────────
+    // ── Integrations (6) ──────────────────────────────────────────
+    {
+        id: "agent-sdk",
+        label: "Claude Agent SDK provider",
+        description:
+            "Route Claude model calls through the Agent SDK to draw from the Claude Pro/Max subscription rate-limit pool",
+        group: "Integrations",
+        defaultOn: true,
+    },
     {
         id: "instructions",
         label: "Instructions",

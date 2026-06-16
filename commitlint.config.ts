@@ -28,6 +28,7 @@ const config: UserConfig = {
                 "context-files",
                 "web-browse",
                 "web-search",
+                "agent-sdk",
             ],
         ],
     },
