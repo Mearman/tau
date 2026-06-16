@@ -20,26 +20,39 @@
 import type { AuthMode } from "./settings.ts";
 
 /**
- * `apiKeySource` values reported in the SDK's `init` system message that mean
- * the subprocess authenticated via OAuth — i.e. the subscription pool. The
- * other values (`user`, `project`, `org`, `temporary`) all mean an API key was
- * used.
+ * `apiKeySource` values reported in the SDK's `init` system message that mean an
+ * API key was used — i.e. the subprocess bills to the Console / extra-usage
+ * pool rather than the Claude Pro/Max subscription pool. The spec's whole point
+ * is to avoid exactly this in subscription mode.
  *
- * Verified against `ApiKeySource` in
- * `@anthropic-ai/claude-agent-sdk` (`sdk.d.ts`).
+ * Everything else is the subscription path: with `ANTHROPIC_API_KEY` scrubbed
+ * (see {@link buildSdkEnv}), the SDK finds no API key and the init message
+ * reports `apiKeySource: "none"`; it then falls back to the Claude Code OAuth
+ * login in `~/.claude`. So `"none"` (no API key) — not `"oauth"` — is the normal
+ * subscription-mode value in practice. `"oauth"` and `undefined` are likewise
+ * API-key-free. Only the four values below indicate an API key.
+ *
+ * (The SDK's `ApiKeySource` type lists `'oauth'` but not `'none'`; the runtime
+ * emits `'none'`, so this check keys off the API-key set rather than an
+ * allowlist, which is also what the spec's "verify, don't block" note intended.)
  */
-const OAUTH_API_KEY_SOURCES: ReadonlySet<string> = new Set(["oauth"]);
+const API_KEY_SOURCES: ReadonlySet<string> = new Set([
+    "user",
+    "project",
+    "org",
+    "temporary",
+]);
 
 /**
- * True when the SDK's reported `apiKeySource` corresponds to OAuth / subscription
- * authentication rather than an API key.
+ * True when the SDK is NOT using an API key — i.e. subscription/OAuth is in
+ * effect. `"none"` (no API key found), `"oauth"`, and `undefined` all qualify;
+ * only the {@link API_KEY_SOURCES} values indicate the Console pool.
  */
 export function isSubscriptionAuthSource(
     apiKeySource: string | undefined
 ): boolean {
-    return (
-        apiKeySource !== undefined && OAUTH_API_KEY_SOURCES.has(apiKeySource)
-    );
+    if (apiKeySource === undefined) return true;
+    return !API_KEY_SOURCES.has(apiKeySource);
 }
 
 /**
@@ -60,8 +73,8 @@ export function buildSdkEnv(
 }
 
 /**
- * Thrown when subscription auth was requested but the SDK did not authenticate
- * via OAuth. Carries the detected source so the error is actionable.
+ * Thrown when subscription auth was requested but the SDK picked up an API key.
+ * Carries the detected source so the error is actionable.
  */
 export class SubscriptionAuthError extends Error {
     readonly detectedSource: string | undefined;
@@ -73,7 +86,7 @@ export class SubscriptionAuthError extends Error {
                     detectedSource === undefined
                         ? "unknown"
                         : `'${detectedSource}'`
-                }, expected 'oauth'). ` +
+                }). ` +
                 `Unset ANTHROPIC_API_KEY and ensure you are logged in via Claude Code ` +
                 `(npx @anthropic-ai/claude-code), or set tau.claudeAgentSdk.authMode ` +
                 `to "apiKey" to opt into the extra-usage pool.`

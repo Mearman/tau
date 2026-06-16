@@ -16,11 +16,21 @@ void describe("isSubscriptionAuthSource", () => {
         assert.equal(isSubscriptionAuthSource("oauth"), true);
     });
 
+    void it("treats 'none' (no API key found) as subscription", () => {
+        // The normal subscription-mode value: ANTHROPIC_API_KEY is scrubbed, so
+        // the SDK finds no key and falls back to the OAuth login.
+        assert.equal(isSubscriptionAuthSource("none"), true);
+    });
+
+    void it("treats an absent source as subscription", () => {
+        assert.equal(isSubscriptionAuthSource(undefined), true);
+    });
+
     void it("treats api-key sources as non-subscription", () => {
         assert.equal(isSubscriptionAuthSource("user"), false);
         assert.equal(isSubscriptionAuthSource("project"), false);
+        assert.equal(isSubscriptionAuthSource("org"), false);
         assert.equal(isSubscriptionAuthSource("temporary"), false);
-        assert.equal(isSubscriptionAuthSource(undefined), false);
     });
 });
 
