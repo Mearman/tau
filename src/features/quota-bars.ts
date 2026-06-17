@@ -1,12 +1,71 @@
 /**
  * Compact block-character progress bars for the status line, modelled on
- * claude-hud's context / usage bars. Pure rendering — no I/O — so the bar
- * math is unit-testable.
+ * claude-hud's context / usage bars.
  */
+
+import { readFileSync } from "node:fs";
+
+/** Path where claude-hud writes its usage snapshot (configured via its
+ *  `externalUsageWritePath` display option). */
+export const CLAUDE_HUD_SNAPSHOT_PATH = "/tmp/claude-hud-usage.json";
+
+/** Maximum age (ms) for a snapshot before it's considered stale. */
+const SNAPSHOT_MAX_AGE_MS = 300_000;
 
 /** A theme with the coloured-text primitive tau's status bar uses. */
 export interface BarTheme {
     fg(colour: string, text: string): string;
+}
+
+/** Both subscription windows, read from the claude-hud snapshot file. */
+export interface UsageSnapshot {
+    fiveHourPct: number | null;
+    sevenDayPct: number | null;
+}
+
+/**
+ * Read the claude-hud usage snapshot (both five-hour and seven-day windows)
+ * from disk. Returns null if the file is missing, malformed, or stale.
+ */
+export function readUsageSnapshot(
+    path: string = CLAUDE_HUD_SNAPSHOT_PATH,
+    now: number = Date.now()
+): UsageSnapshot | null {
+    let raw: string;
+    try {
+        raw = readFileSync(path, "utf8");
+    } catch {
+        return null;
+    }
+    let data: unknown;
+    try {
+        data = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    if (typeof data !== "object" || data === null || Array.isArray(data))
+        return null;
+    const obj = data as Record<string, unknown>;
+    // Freshness check.
+    const updated = Date.parse(
+        typeof obj["updated_at"] === "string" ? obj["updated_at"] : ""
+    );
+    if (Number.isNaN(updated) || now - updated > SNAPSHOT_MAX_AGE_MS)
+        return null;
+    const num = (v: unknown): number | null =>
+        typeof v === "number" && Number.isFinite(v) ? v : null;
+    return {
+        fiveHourPct: num(
+            (obj["five_hour"] as Record<string, unknown> | undefined)?.[
+                "used_percentage"
+            ]
+        ),
+        sevenDayPct: num(
+            (obj["seven_day"] as Record<string, unknown> | undefined)?.[
+                "used_percentage"
+            ]
+        ),
+    };
 }
 
 /** Colour name for a utilisation level (green → amber → red). */

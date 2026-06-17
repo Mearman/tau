@@ -72,7 +72,7 @@ import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerWebSearch } from "./features/web-search/index.ts";
 import { registerAgentSdkProvider } from "./features/agent-sdk/index.ts";
 import { registerClaudeResumeCommand } from "./features/claude-resume.ts";
-import { buildStatusBars } from "./features/quota-bars.ts";
+import { buildStatusBars, readUsageSnapshot } from "./features/quota-bars.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -297,9 +297,10 @@ export default function (pi: ExtensionAPI) {
         }
 
         // Render context / 5h / 7d bars in the status line, matching Claude
-        // Code's own layout. Context from ctx.getContextUsage(); the two
-        // subscription windows from the agent-sdk rate-limit events.
+        // Code's own layout. Prefer claude-hud's snapshot (both windows);
+        // fall back to the agent-sdk rate-limit events (binding window only).
         if (ctx.hasUI) {
+            const snapshot = readUsageSnapshot();
             const rl = state.agentSdkRateLimits;
             const cu = ctx.getContextUsage();
             const bars = buildStatusBars(
@@ -307,8 +308,14 @@ export default function (pi: ExtensionAPI) {
                     contextPct: cu?.percent ?? null,
                     sessionPct: null,
                     sessionLabel: null,
-                    fiveHourPct: rl.fiveHour?.utilization ?? null,
-                    sevenDayPct: rl.sevenDay?.utilization ?? null,
+                    fiveHourPct:
+                        snapshot?.fiveHourPct ??
+                        rl.fiveHour?.utilization ??
+                        null,
+                    sevenDayPct:
+                        snapshot?.sevenDayPct ??
+                        rl.sevenDay?.utilization ??
+                        null,
                 },
                 ctx.ui.theme
             );
