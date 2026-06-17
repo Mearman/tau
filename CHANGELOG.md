@@ -1,3 +1,9 @@
+## [2.4.0](https://github.com/Mearman/tau/compare/v2.3.0...v2.4.0) (2026-06-17)
+
+### Features
+
+* **custom-footer:** add context/session/weekly bars ([cbf3e31](https://github.com/Mearman/tau/commit/cbf3e3157df2bd72b7a2cc5f1e6fd442006c441e))
+
 ## [2.3.0](https://github.com/Mearman/tau/compare/v2.2.0...v2.3.0) (2026-06-17)
 
 ### Features
