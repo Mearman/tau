@@ -8,6 +8,30 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { TauState } from "../state.ts";
 import { isFeatureEnabled } from "./features-helpers.ts";
 
+/** Colour name for a given utilisation level (green → amber → red). */
+function levelColour(pct: number): string {
+    if (pct >= 85) return "error";
+    if (pct >= 60) return "warning";
+    return "success";
+}
+
+/**
+ * Draw a fixed-width block-character bar, coloured by level.
+ * `█` filled, `░` empty, clamped to 0–100.
+ */
+function drawBar(
+    pct: number,
+    width: number,
+    theme: { fg(colour: string, text: string): string }
+): string {
+    const clamped = Math.min(100, Math.max(0, pct));
+    const filled = Math.round((clamped / 100) * width);
+    return theme.fg(
+        levelColour(clamped),
+        "█".repeat(filled) + "░".repeat(width - filled)
+    );
+}
+
 export function registerCustomFooter(pi: ExtensionAPI, state: TauState): void {
     let enabled = false;
 
@@ -57,7 +81,76 @@ export function registerCustomFooter(pi: ExtensionAPI, state: TauState): void {
                             const branch = footerData.getGitBranch();
                             const fmt = (n: number) =>
                                 n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`;
+                            const lines: string[] = [];
+                            const barWidth = 10;
+                            const label = (s: string) => theme.fg("dim", s);
 
+                            // Context window bar
+                            const cu = ctx.getContextUsage();
+                            if (cu && cu.percent != null) {
+                                lines.push(
+                                    truncateToWidth(
+                                        `${label("Context  ")}${drawBar(
+                                            cu.percent,
+                                            barWidth,
+                                            theme
+                                        )}${label(
+                                            ` ${Math.round(cu.percent)}%`
+                                        )}`,
+                                        width
+                                    )
+                                );
+                            }
+
+                            // Session tokens bar (relative to one context window)
+                            const sessionTokens = input + output;
+                            if (cu?.contextWindow && sessionTokens > 0) {
+                                const sPct = Math.min(
+                                    100,
+                                    (sessionTokens / cu.contextWindow) * 100
+                                );
+                                lines.push(
+                                    truncateToWidth(
+                                        `${label("Session  ")}${drawBar(
+                                            sPct,
+                                            barWidth,
+                                            theme
+                                        )}${label(` ${fmt(sessionTokens)}`)}`,
+                                        width
+                                    )
+                                );
+                            }
+
+                            // Weekly subscription quota bar
+                            const rl = state.agentSdkRateLimit;
+                            if (rl?.utilization != null) {
+                                const window =
+                                    rl.rateLimitType === "five_hour"
+                                        ? "5h"
+                                        : rl.rateLimitType === "seven_day" ||
+                                            rl.rateLimitType ===
+                                                "seven_day_opus" ||
+                                            rl.rateLimitType ===
+                                                "seven_day_sonnet"
+                                          ? "7d"
+                                          : (rl.rateLimitType ?? "");
+                                lines.push(
+                                    truncateToWidth(
+                                        `${label("Weekly   ")}${drawBar(
+                                            rl.utilization,
+                                            barWidth,
+                                            theme
+                                        )}${label(
+                                            ` ${Math.round(rl.utilization)}%${
+                                                window ? " " + window : ""
+                                            }`
+                                        )}`,
+                                        width
+                                    )
+                                );
+                            }
+
+                            // Token usage + model + branch info line
                             const left = theme.fg(
                                 "dim",
                                 `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}`
@@ -67,7 +160,6 @@ export function registerCustomFooter(pi: ExtensionAPI, state: TauState): void {
                                 "dim",
                                 `${ctx.model?.id || "no-model"}${branchStr}`
                             );
-
                             const pad = " ".repeat(
                                 Math.max(
                                     1,
@@ -76,7 +168,10 @@ export function registerCustomFooter(pi: ExtensionAPI, state: TauState): void {
                                         visibleWidth(right)
                                 )
                             );
-                            return [truncateToWidth(left + pad + right, width)];
+                            lines.push(
+                                truncateToWidth(left + pad + right, width)
+                            );
+                            return lines;
                         },
                     };
                 });

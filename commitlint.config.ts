@@ -30,6 +30,7 @@ const config: UserConfig = {
                 "web-search",
                 "agent-sdk",
                 "claude-resume",
+                "custom-footer",
             ],
         ],
     },
