@@ -43,16 +43,18 @@ void describe("buildStatusBars", () => {
                 contextPct: 50,
                 sessionPct: null,
                 sessionLabel: null,
-                weeklyPct: 80,
-                weeklyLabel: "7d",
+                fiveHourPct: 20,
+                sevenDayPct: 80,
             },
             theme
         );
         assert.ok(out);
         assert.match(out, /ctx/);
         assert.ok(!out.includes("ses")); // session omitted
-        assert.match(out, /wk/);
-        assert.match(out, /80% 7d/);
+        assert.match(out, /5h/);
+        assert.match(out, /20%/);
+        assert.match(out, /7d/);
+        assert.match(out, /80%/);
     });
 
     void it("returns undefined when no data", () => {
@@ -62,8 +64,8 @@ void describe("buildStatusBars", () => {
                     contextPct: null,
                     sessionPct: null,
                     sessionLabel: null,
-                    weeklyPct: null,
-                    weeklyLabel: null,
+                    fiveHourPct: null,
+                    sevenDayPct: null,
                 },
                 theme
             ),

@@ -36,15 +36,17 @@ export interface BarInputs {
     sessionPct: number | null;
     /** Short session-size label, e.g. "42k". */
     sessionLabel: string | null;
-    /** Seven-day (or five-hour) subscription quota, 0–100, or null. */
-    weeklyPct: number | null;
-    /** Quota window label, e.g. "7d". */
-    weeklyLabel: string | null;
+    /** Five-hour subscription window, 0–100, or null. */
+    fiveHourPct: number | null;
+    /** Seven-day subscription window, 0–100, or null. */
+    sevenDayPct: number | null;
 }
 
 /**
- * Build a single-line status string of up to three compact bars
- * (context · session · weekly). Returns undefined when there's nothing to show.
+ * Build a single-line status string of compact bars. Context and session are
+ * shown when available; the five-hour and seven-day subscription windows are
+ * always shown when present (matching Claude Code's own status line layout).
+ * Returns undefined when there's nothing to show.
  */
 export function buildStatusBars(
     inputs: BarInputs,
@@ -69,15 +71,18 @@ export function buildStatusBars(
                 dim(` ${inputs.sessionLabel ?? ""}`)
         );
     }
-    if (inputs.weeklyPct !== null) {
+    if (inputs.fiveHourPct !== null) {
         parts.push(
-            dim("wk ") +
-                drawBar(inputs.weeklyPct, barWidth, theme) +
-                dim(
-                    ` ${Math.round(inputs.weeklyPct)}%${
-                        inputs.weeklyLabel ? " " + inputs.weeklyLabel : ""
-                    }`
-                )
+            dim("5h ") +
+                drawBar(inputs.fiveHourPct, barWidth, theme) +
+                dim(` ${Math.round(inputs.fiveHourPct)}%`)
+        );
+    }
+    if (inputs.sevenDayPct !== null) {
+        parts.push(
+            dim("7d ") +
+                drawBar(inputs.sevenDayPct, barWidth, theme) +
+                dim(` ${Math.round(inputs.sevenDayPct)}%`)
         );
     }
     return parts.length > 0 ? parts.join(sep) : undefined;

@@ -296,46 +296,19 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.setStatus("tau-web", undefined);
         }
 
-        // Render context / session / weekly bars in the status line, modelled
-        // on claude-hud. Context comes from ctx.getContextUsage(); session is
-        // cumulative tokens this branch; weekly is the agent-sdk rate-limit.
+        // Render context / 5h / 7d bars in the status line, matching Claude
+        // Code's own layout. Context from ctx.getContextUsage(); the two
+        // subscription windows from the agent-sdk rate-limit events.
         if (ctx.hasUI) {
-            const rl = state.agentSdkRateLimit;
-            let sessionTokens = 0;
-            for (const e of ctx.sessionManager.getBranch()) {
-                if (e.type === "message" && e.message.role === "assistant") {
-                    const u = (
-                        e.message as {
-                            usage?: { input?: number; output?: number };
-                        }
-                    ).usage;
-                    sessionTokens += (u?.input ?? 0) + (u?.output ?? 0);
-                }
-            }
-            const fmt = (n: number) =>
-                n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`;
+            const rl = state.agentSdkRateLimits;
             const cu = ctx.getContextUsage();
-            const contextPct = cu?.percent ?? null;
-            const sessionPct =
-                cu?.contextWindow && sessionTokens > 0
-                    ? Math.min(100, (sessionTokens / cu.contextWindow) * 100)
-                    : null;
-            const weeklyPct = rl?.utilization ?? null;
-            const weeklyLabel =
-                rl?.rateLimitType === "five_hour"
-                    ? "5h"
-                    : rl?.rateLimitType === "seven_day" ||
-                        rl?.rateLimitType === "seven_day_opus" ||
-                        rl?.rateLimitType === "seven_day_sonnet"
-                      ? "7d"
-                      : (rl?.rateLimitType ?? null);
             const bars = buildStatusBars(
                 {
-                    contextPct,
-                    sessionPct,
-                    sessionLabel: sessionTokens > 0 ? fmt(sessionTokens) : null,
-                    weeklyPct,
-                    weeklyLabel,
+                    contextPct: cu?.percent ?? null,
+                    sessionPct: null,
+                    sessionLabel: null,
+                    fiveHourPct: rl.fiveHour?.utilization ?? null,
+                    sevenDayPct: rl.sevenDay?.utilization ?? null,
                 },
                 ctx.ui.theme
             );

@@ -1035,7 +1035,14 @@ async function runAgentSdkQuery(
                 const rl = message.rate_limit_info;
                 deps.onRateLimit({
                     status: rl.status,
-                    utilization: rl.utilization,
+                    // The SDK reports utilization as a 0–1 fraction; convert to
+                    // 0–100 for display. Values already > 1 are left as-is.
+                    utilization:
+                        rl.utilization !== undefined
+                            ? rl.utilization <= 1
+                                ? rl.utilization * 100
+                                : rl.utilization
+                            : undefined,
                     rateLimitType: rl.rateLimitType,
                     resetsAt: rl.resetsAt,
                     isUsingOverage: rl.isUsingOverage,

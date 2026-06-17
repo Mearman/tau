@@ -118,6 +118,13 @@ export function registerAgentSdkProvider(
         return streamClaudeAgentSdk(model, context, options, {
             settings,
             sdkSessions: state.agentSdkSessions,
+            onRateLimit: (info) => {
+                if (info.rateLimitType === "five_hour") {
+                    state.agentSdkRateLimits.fiveHour = info;
+                } else {
+                    state.agentSdkRateLimits.sevenDay = info;
+                }
+            },
         });
     };
 

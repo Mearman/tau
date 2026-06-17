@@ -158,9 +158,12 @@ export class TauState {
     >();
 
     /**
-     * Last subscription rate-limit snapshot reported by the Agent SDK (five /
-     * seven-day window utilisation), surfaced from the SDK result message for
-     * the status bar. Undefined unless the agent-sdk provider has run.
+     * Subscription rate-limit snapshots from the Agent SDK, keyed by window.
+     * `fiveHour` / `sevenDay` are updated independently from the SDK's
+     * rate_limit_event stream (each event carries one window).
      */
-    agentSdkRateLimit?: import("./features/agent-sdk/provider.ts").AgentSdkRateLimit;
+    agentSdkRateLimits: {
+        fiveHour?: import("./features/agent-sdk/provider.ts").AgentSdkRateLimit;
+        sevenDay?: import("./features/agent-sdk/provider.ts").AgentSdkRateLimit;
+    } = {};
 }
