@@ -1,3 +1,9 @@
+## [2.7.0](https://github.com/Mearman/tau/compare/v2.6.0...v2.7.0) (2026-06-17)
+
+### Features
+
+* **status:** native quota capture via statusline wrapper ([57adb45](https://github.com/Mearman/tau/commit/57adb45306f0ed014b667eca9a41abc97190d28e))
+
 ## [2.6.0](https://github.com/Mearman/tau/compare/v2.5.1...v2.6.0) (2026-06-17)
 
 ### Features
