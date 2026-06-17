@@ -72,6 +72,7 @@ import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerWebSearch } from "./features/web-search/index.ts";
 import { registerAgentSdkProvider } from "./features/agent-sdk/index.ts";
 import { registerClaudeResumeCommand } from "./features/claude-resume.ts";
+import { buildStatusBars } from "./features/quota-bars.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -295,45 +296,50 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.setStatus("tau-web", undefined);
         }
 
-        // Render the Agent SDK subscription quota (five/seven-day window) in the
-        // status bar, sourced from the SDK result's rate_limit_info.
+        // Render context / session / weekly bars in the status line, modelled
+        // on claude-hud. Context comes from ctx.getContextUsage(); session is
+        // cumulative tokens this branch; weekly is the agent-sdk rate-limit.
         if (ctx.hasUI) {
             const rl = state.agentSdkRateLimit;
-            if (rl) {
-                const pct =
-                    rl.utilization !== undefined
-                        ? Math.round(rl.utilization)
-                        : null;
-                const warn =
-                    rl.status === "rejected" ||
-                    rl.isUsingOverage === true ||
-                    (pct !== null && pct >= 100);
-                const colour =
-                    rl.status === "rejected" || (pct !== null && pct >= 100)
-                        ? "error"
-                        : rl.status === "allowed_warning" ||
-                            (pct !== null && pct >= 80)
-                          ? "warning"
-                          : "success";
-                const window =
-                    rl.rateLimitType === "five_hour"
-                        ? "5h"
-                        : rl.rateLimitType === "seven_day"
-                          ? "7d"
-                          : rl.rateLimitType === "seven_day_opus"
-                            ? "7d·opus"
-                            : rl.rateLimitType === "seven_day_sonnet"
-                              ? "7d·sonnet"
-                              : rl.rateLimitType === "overage"
-                                ? "overage"
-                                : (rl.rateLimitType ?? "");
-                const icon = warn ? "⚠" : "🔋";
-                const text =
-                    pct !== null
-                        ? `${icon} ${pct}%${window ? " " + window : ""}`
-                        : `${icon} ${rl.status}`;
-                ctx.ui.setStatus("tau-quota", ctx.ui.theme.fg(colour, text));
+            let sessionTokens = 0;
+            for (const e of ctx.sessionManager.getBranch()) {
+                if (e.type === "message" && e.message.role === "assistant") {
+                    const u = (
+                        e.message as {
+                            usage?: { input?: number; output?: number };
+                        }
+                    ).usage;
+                    sessionTokens += (u?.input ?? 0) + (u?.output ?? 0);
+                }
             }
+            const fmt = (n: number) =>
+                n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`;
+            const cu = ctx.getContextUsage();
+            const contextPct = cu?.percent ?? null;
+            const sessionPct =
+                cu?.contextWindow && sessionTokens > 0
+                    ? Math.min(100, (sessionTokens / cu.contextWindow) * 100)
+                    : null;
+            const weeklyPct = rl?.utilization ?? null;
+            const weeklyLabel =
+                rl?.rateLimitType === "five_hour"
+                    ? "5h"
+                    : rl?.rateLimitType === "seven_day" ||
+                        rl?.rateLimitType === "seven_day_opus" ||
+                        rl?.rateLimitType === "seven_day_sonnet"
+                      ? "7d"
+                      : (rl?.rateLimitType ?? null);
+            const bars = buildStatusBars(
+                {
+                    contextPct,
+                    sessionPct,
+                    sessionLabel: sessionTokens > 0 ? fmt(sessionTokens) : null,
+                    weeklyPct,
+                    weeklyLabel,
+                },
+                ctx.ui.theme
+            );
+            ctx.ui.setStatus("tau-quota", bars);
         }
     });
 
