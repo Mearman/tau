@@ -1,3 +1,9 @@
+## [2.5.1](https://github.com/Mearman/tau/compare/v2.5.0...v2.5.1) (2026-06-17)
+
+### Bug Fixes
+
+* **status:** correct utilization scale and track both quota windows ([8410aea](https://github.com/Mearman/tau/commit/8410aea3cea4772ca99719d455707871528dd0d9))
+
 ## [2.5.0](https://github.com/Mearman/tau/compare/v2.4.0...v2.5.0) (2026-06-17)
 
 ### Features
