@@ -1,3 +1,9 @@
+## [2.6.0](https://github.com/Mearman/tau/compare/v2.5.1...v2.6.0) (2026-06-17)
+
+### Features
+
+* **status:** read both quota windows from claude-hud snapshot ([bf4db36](https://github.com/Mearman/tau/commit/bf4db36835cbb0c8265edf738f704743c6baa9da))
+
 ## [2.5.1](https://github.com/Mearman/tau/compare/v2.5.0...v2.5.1) (2026-06-17)
 
 ### Bug Fixes
