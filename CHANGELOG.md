@@ -1,3 +1,9 @@
+## [2.5.0](https://github.com/Mearman/tau/compare/v2.4.0...v2.5.0) (2026-06-17)
+
+### Features
+
+* **status:** show context/session/weekly bars in the statusline ([8c4d2ca](https://github.com/Mearman/tau/commit/8c4d2cac7eac1f0fd2e000fce7e2d3ff956dfa69))
+
 ## [2.4.0](https://github.com/Mearman/tau/compare/v2.3.0...v2.4.0) (2026-06-17)
 
 ### Features
