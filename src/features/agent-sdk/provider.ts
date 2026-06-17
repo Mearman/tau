@@ -809,6 +809,24 @@ function buildCustomToolServers(
 
 // ── The streaming core ────────────────────────────────────────────────
 
+/**
+ * Subscription rate-limit snapshot, captured from the SDK result message's
+ * `rate_limit_info` and surfaced to the host (e.g. tau's status bar).
+ */
+export interface AgentSdkRateLimit {
+    status: "allowed" | "allowed_warning" | "rejected";
+    /** 0–100 utilisation of the binding window, when reported. */
+    utilization: number | undefined;
+    /** Which window the limit applies to. */
+    rateLimitType: string | undefined;
+    /** Unix-seconds reset time of the binding window. */
+    resetsAt: number | undefined;
+    /** True when drawing from the paid overage pool. */
+    isUsingOverage: boolean | undefined;
+    /** When this snapshot was captured (epoch ms). */
+    updatedAt: number;
+}
+
 interface StreamDeps {
     settings: AgentSdkSettings;
     /**
@@ -820,6 +838,8 @@ interface StreamDeps {
         string,
         { sdkSessionId: string | undefined; sentCount: number; head: string }
     >;
+    /** Called with the subscription rate-limit snapshot when the SDK reports it. */
+    onRateLimit?: (info: AgentSdkRateLimit) => void;
 }
 
 /**
@@ -1005,6 +1025,22 @@ async function runAgentSdkQuery(
                 }
             } else if (isResultMessage(message)) {
                 handleResultMessage(message, output, sawStreamEvent);
+            } else if (
+                message.type === "rate_limit_event" &&
+                deps.onRateLimit
+            ) {
+                // The SDK emits a rate_limit_event whenever the subscription
+                // window (five-hour / seven-day) changes — the same data Claude
+                // Code shows. Surface it to the host for the status bar.
+                const rl = message.rate_limit_info;
+                deps.onRateLimit({
+                    status: rl.status,
+                    utilization: rl.utilization,
+                    rateLimitType: rl.rateLimitType,
+                    resetsAt: rl.resetsAt,
+                    isUsingOverage: rl.isUsingOverage,
+                    updatedAt: Date.now(),
+                });
             }
 
             if (stopEarly) break;

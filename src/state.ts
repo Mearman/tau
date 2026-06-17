@@ -156,4 +156,11 @@ export class TauState {
         string,
         { sdkSessionId: string | undefined; sentCount: number; head: string }
     >();
+
+    /**
+     * Last subscription rate-limit snapshot reported by the Agent SDK (five /
+     * seven-day window utilisation), surfaced from the SDK result message for
+     * the status bar. Undefined unless the agent-sdk provider has run.
+     */
+    agentSdkRateLimit?: import("./features/agent-sdk/provider.ts").AgentSdkRateLimit;
 }

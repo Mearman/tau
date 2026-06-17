@@ -294,6 +294,47 @@ export default function (pi: ExtensionAPI) {
         if (ctx.hasUI) {
             ctx.ui.setStatus("tau-web", undefined);
         }
+
+        // Render the Agent SDK subscription quota (five/seven-day window) in the
+        // status bar, sourced from the SDK result's rate_limit_info.
+        if (ctx.hasUI) {
+            const rl = state.agentSdkRateLimit;
+            if (rl) {
+                const pct =
+                    rl.utilization !== undefined
+                        ? Math.round(rl.utilization)
+                        : null;
+                const warn =
+                    rl.status === "rejected" ||
+                    rl.isUsingOverage === true ||
+                    (pct !== null && pct >= 100);
+                const colour =
+                    rl.status === "rejected" || (pct !== null && pct >= 100)
+                        ? "error"
+                        : rl.status === "allowed_warning" ||
+                            (pct !== null && pct >= 80)
+                          ? "warning"
+                          : "success";
+                const window =
+                    rl.rateLimitType === "five_hour"
+                        ? "5h"
+                        : rl.rateLimitType === "seven_day"
+                          ? "7d"
+                          : rl.rateLimitType === "seven_day_opus"
+                            ? "7d·opus"
+                            : rl.rateLimitType === "seven_day_sonnet"
+                              ? "7d·sonnet"
+                              : rl.rateLimitType === "overage"
+                                ? "overage"
+                                : (rl.rateLimitType ?? "");
+                const icon = warn ? "⚠" : "🔋";
+                const text =
+                    pct !== null
+                        ? `${icon} ${pct}%${window ? " " + window : ""}`
+                        : `${icon} ${rl.status}`;
+                ctx.ui.setStatus("tau-quota", ctx.ui.theme.fg(colour, text));
+            }
+        }
     });
 
     // Plan-mode: inject context before agent starts
