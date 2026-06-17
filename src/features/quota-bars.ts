@@ -3,11 +3,14 @@
  * claude-hud's context / usage bars.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 /** Path where claude-hud writes its usage snapshot (configured via its
  *  `externalUsageWritePath` display option). */
 export const CLAUDE_HUD_SNAPSHOT_PATH = "/tmp/claude-hud-usage.json";
+
+/** Path where tau's statusline wrapper captures Claude Code's stdin JSON. */
+export const STATUSLINE_INPUT_PATH = "/tmp/cc-statusline-input.json";
 
 /** Maximum age (ms) for a snapshot before it's considered stale. */
 const SNAPSHOT_MAX_AGE_MS = 300_000;
@@ -65,6 +68,57 @@ export function readUsageSnapshot(
                 "used_percentage"
             ]
         ),
+    };
+}
+
+/**
+ * Read Claude Code's raw statusline stdin JSON (captured by tau's
+ * statusline-wrapper.sh) for both rate-limit windows. This is the richest
+ * native source — the same data Claude Code pipes to any statusline command.
+ * Returns null if the file is missing, stale, or has no rate_limits.
+ */
+export function readStatuslineRateLimits(
+    path: string = STATUSLINE_INPUT_PATH,
+    maxAgeMs: number = SNAPSHOT_MAX_AGE_MS,
+    now: number = Date.now()
+): UsageSnapshot | null {
+    try {
+        const stat = statSync(path);
+        if (now - stat.mtimeMs > maxAgeMs) return null;
+    } catch {
+        return null;
+    }
+    let raw: string;
+    try {
+        raw = readFileSync(path, "utf8");
+    } catch {
+        return null;
+    }
+    let data: unknown;
+    try {
+        data = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    if (typeof data !== "object" || data === null || Array.isArray(data))
+        return null;
+    const obj = data as Record<string, unknown>;
+    const rl = obj["rate_limits"];
+    if (typeof rl !== "object" || rl === null || Array.isArray(rl)) return null;
+    const rlObj = rl as Record<string, unknown>;
+    const num = (v: unknown): number | null =>
+        typeof v === "number" && Number.isFinite(v) ? v : null;
+    const fiveHour =
+        typeof rlObj["five_hour"] === "object" && rlObj["five_hour"] !== null
+            ? (rlObj["five_hour"] as Record<string, unknown>)
+            : {};
+    const sevenDay =
+        typeof rlObj["seven_day"] === "object" && rlObj["seven_day"] !== null
+            ? (rlObj["seven_day"] as Record<string, unknown>)
+            : {};
+    return {
+        fiveHourPct: num(fiveHour["used_percentage"]),
+        sevenDayPct: num(sevenDay["used_percentage"]),
     };
 }
 

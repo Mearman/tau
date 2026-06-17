@@ -72,7 +72,12 @@ import { registerWebBrowse } from "./features/web-browse/index.ts";
 import { registerWebSearch } from "./features/web-search/index.ts";
 import { registerAgentSdkProvider } from "./features/agent-sdk/index.ts";
 import { registerClaudeResumeCommand } from "./features/claude-resume.ts";
-import { buildStatusBars, readUsageSnapshot } from "./features/quota-bars.ts";
+import {
+    buildStatusBars,
+    readStatuslineRateLimits,
+    readUsageSnapshot,
+} from "./features/quota-bars.ts";
+import { registerSetupQuotaCommand } from "./features/setup-quota.ts";
 import { registerReloadTool } from "./features/reload.ts";
 import { registerCallbacks } from "./features/callbacks.ts";
 import { registerPermissions } from "./features/permissions/commands.js";
@@ -113,6 +118,7 @@ export default function (pi: ExtensionAPI) {
     registerWebSearch(pi, state);
     registerAgentSdkProvider(pi, state);
     registerClaudeResumeCommand(pi, state);
+    registerSetupQuotaCommand(pi, state);
     registerReloadTool(pi, state);
     registerCallbacks(pi, state);
     registerPermissions(pi, state);
@@ -300,7 +306,10 @@ export default function (pi: ExtensionAPI) {
         // Code's own layout. Prefer claude-hud's snapshot (both windows);
         // fall back to the agent-sdk rate-limit events (binding window only).
         if (ctx.hasUI) {
-            const snapshot = readUsageSnapshot();
+            // Prefer the raw statusline capture (both windows, freshest);
+            // fall back to claude-hud's snapshot, then SDK rate_limit events.
+            const statusline = readStatuslineRateLimits();
+            const snapshot = statusline ?? readUsageSnapshot();
             const rl = state.agentSdkRateLimits;
             const cu = ctx.getContextUsage();
             const bars = buildStatusBars(
