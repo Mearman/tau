@@ -1,3 +1,9 @@
+## [2.3.0](https://github.com/Mearman/tau/compare/v2.2.0...v2.3.0) (2026-06-17)
+
+### Features
+
+* **agent-sdk:** surface subscription quota in the status bar ([fb8fce5](https://github.com/Mearman/tau/commit/fb8fce5df00e23dbf169e6dff792a1a460dec92e))
+
 ## [2.2.0](https://github.com/Mearman/tau/compare/v2.1.1...v2.2.0) (2026-06-16)
 
 ### Features
