@@ -13,6 +13,7 @@
     "url": "git+https://github.com/Mearman/tau.git"
   },
   "files": [
+    "index.ts",
     "src/",
     "chrome-extension/",
     "bridge/",
