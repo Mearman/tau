@@ -7,6 +7,9 @@
 
 Background tasks, notifications, plan mode, presets, and other enhancements for the pi agent loop. Modelled after Claude Code's UX where possible.
 
+[![npm downloads chart, log scale](https://shieldcn.dev/chart/npm/pi-tau.svg?bg=transparent&logo=false&yScale=log)](https://www.npmjs.com/package/pi-tau)
+[![GitHub stars chart, log scale](https://shieldcn.dev/chart/stars/Mearman/tau.svg?bg=transparent&logo=false&yScale=log)](https://github.com/Mearman/tau/stargazers)
+
 ## Features
 
 ### Background Tasks
